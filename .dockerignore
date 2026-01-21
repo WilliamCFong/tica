@@ -1,0 +1,12 @@
+.git
+.dvc
+*.pyc
+__pycache__
+*.egg-info
+dist/
+build/
+.pytest_cache/
+calibration_models/
+reg_test/input/
+reg_test/output_checks/
+reg_test/ref_stars/

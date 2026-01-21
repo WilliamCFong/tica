@@ -39,13 +39,12 @@ Next, you will need to clone the TICA repository to get the calibration models, 
   ```
   git clone https://github.com/mmfausnaugh/tica.git
   cd tica
-  python setup.py sdist
   pip install -e .
   ```
 
 Instead, you can  add the `tica` repository to you `PYTHONPATH` environment variable and `tica/bin` to your `PATH`.
 
-See the `requirements.txt` file for a list of required packages.  Besides typical scientific computing packages (`numpy`, `scipy`, `matplotlib`, and `astropy`), TICA requires `gwcs` (https://github.com/spacetelescope/gwcs) and `tess-point` (https://github.com/christopherburke/tess-point).  The `setup.py` file should install any missing packages.  
+See the `requirements.txt` file for a list of required packages.  Besides typical scientific computing packages (`numpy`, `scipy`, `matplotlib`, and `astropy`), TICA requires `gwcs` (https://github.com/spacetelescope/gwcs) and `tess-point` (https://github.com/christopherburke/tess-point).  The `pyproject.toml` file should install any missing packages.  
 
 <!--- You can also copy the TICA HLSP production environment with the `tica/environment.yml` file
 ```

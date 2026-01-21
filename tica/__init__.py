@@ -21,11 +21,12 @@ import logging
 import platform
 import locale
 import sys
-import os.path
 
-fstem = os.path.abspath(os.path.dirname(__file__) + '/../')
-with open(os.path.join(fstem, 'VERSION'),'r') as infile:
-    version = infile.read()
+try:
+    from importlib.metadata import version as get_version
+    version = get_version("tica")
+except Exception:
+    version = "unknown"
 
 def platform_info():
     lines = []
