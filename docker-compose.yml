@@ -1,0 +1,16 @@
+services:
+  tica:
+    build: .
+    volumes:
+      - .:/app
+      - ./calibration_models:/app/calibration_models:ro
+    working_dir: /app
+    command: bash
+
+  dev:
+    build: .
+    volumes:
+      - .:/app
+      - ./calibration_models:/app/calibration_models:ro
+    working_dir: /app
+    command: pip install -e ".[dev]" && bash
