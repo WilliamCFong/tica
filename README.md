@@ -26,13 +26,13 @@ If you have questions or are having trouble, feel free to contact the project ow
 ## Installation
 ### 1. Environment and Codebase
 
-TICA requires python version 3.9 or higher.  Using a virtual environment for the TICA installation is considered best practice.  With the `conda` environment manager, you can choose the python version for a given environment:
+TICA requires python version 3.11 or higher.  Using a virtual environment for the TICA installation is considered best practice.  With the `conda` environment manager, you can choose the python version for a given environment:
 ```
-conda create -n tica_env python=3.10
+conda create -n tica_env python=3.11
 conda activate tica_env
 ```
 
-If you have python 3.9 or higher, you can instead use `virtualenv` or a similar environment manager.
+If you have python 3.11 or higher, you can instead use `virtualenv` or a similar environment manager.
 
 Next, you will need to clone the TICA repository to get the calibration models, so you should install from here:
 
