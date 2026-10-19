@@ -1,14 +1,19 @@
-##Update August 2021---this is an old system, used for installation management on tess PDO systems.  We will likely remove for this public version of the code
-
-
 # -*- makefile -*-
 # this makefile contains rules for managing TICA code
 # Copyright 2018 MIT
 # Licensed under terms of the GPLv3
 
-VERSION=$(shell grep ^__version__ tica/__init__.py | sed -e 's/__version__ *= *//' | sed -e "s/'//g")
+VERSION=$(shell cat VERSION)
+PYTHON_VERSION=3.12
 
-TESTDIR=$(TMPDIR)/tica-test-$(USER)
+# docker compose reads these to tag images as tica:<VERSION> / tica-dev:<VERSION>
+export TICA_VERSION=$(VERSION)
+export TICA_UID=$(shell id -u)
+export TICA_GID=$(shell id -g)
+COMPOSE=docker compose
+UV_IMAGE=ghcr.io/astral-sh/uv:python$(PYTHON_VERSION)-bookworm-slim
+UV_COMPILE=uv pip compile pyproject.toml --universal --python-version $(PYTHON_VERSION) --generate-hashes --no-header -q
+
 RELDIR=/sw/tica-versions
 RELEASE_LABEL=tica-$(VERSION)
 
@@ -16,34 +21,40 @@ all: help
 
 help:
 	@echo "options include:"
-	@echo "    test       run all of the tests"
-	@echo "    test-units run the unit tests"
+	@echo "    build      build the tica:$(VERSION) runtime image"
+	@echo "    build-dev  build the tica-dev:$(VERSION) development image"
+	@echo "    test       run the installation smoke tests in the dev image"
+	@echo "    reg-test   run the regression test in the dev image (needs DVC data, see README)"
+	@echo "    shell      open a shell in the dev image on this checkout"
+	@echo "    lock       regenerate requirements*.lock from pyproject.toml"
 	@echo "    install    install the software"
 	@echo "    release    install to the release space"
 	@echo "    bless      make the latest release the blessed release"
 
 info:
 	@echo "    VERSION: $(VERSION)"
-	@echo "    TESTDIR: $(TESTDIR)"
+	@echo "    PYTHON_VERSION: $(PYTHON_VERSION)"
 
-coverage:
-	make test COVER='coverage run -p'
-	coverage combine
-	coverage html --directory $(TESTDIR)/coverage-report
-	@echo "coverage report is at $(TESTDIR)/coverage-report"
+build:
+	$(COMPOSE) build tica
 
-testdir:
-	mkdir -p $(TESTDIR)
+build-dev:
+	$(COMPOSE) build dev
 
-test: test-units
+test: build-dev
+	$(COMPOSE) run --rm dev pytest
 
-ifdef SUITE
-TEST_OPTS=--test-suite $(SUITE)
-endif
-test-units:
-	$(COVER) ./setup.py test $(TEST_OPTS)
+reg-test: build-dev
+	$(COMPOSE) run --rm -w /app/reg_test dev python run_reg_test.py
 
-# FIXME: prefer to use setup.py and setup.cfg, but that does not work yet
+shell: build-dev
+	$(COMPOSE) run --rm dev
+
+lock:
+	docker run --rm -v "$(CURDIR)":/src -w /src $(UV_IMAGE) sh -c '\
+		$(UV_COMPILE) -o requirements.lock && \
+		$(UV_COMPILE) --extra dev --extra data -c requirements.lock -o requirements-dev.lock'
+
 ifndef $PREFIX
 PREFIX=/opt/tica
 endif
@@ -63,3 +74,5 @@ release:
 bless:
 	rm -f /sw/tica
 	ln -s tica-versions/$(RELEASE_LABEL) /sw/tica
+
+.PHONY: all help info build build-dev test reg-test shell lock install release bless

@@ -26,8 +26,9 @@ from multiprocessing import Pool
 DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join( DIR,'..'))
 from btjd.btjd_correction import btjd_correction
-ephemeris_file = os.path.join( DIR,'../btjd/tess_ephem.txt')
-ephemeris_data = np.genfromtxt(os.path.join(ephemeris_file))
+from importlib.resources import files
+ephemeris_file = files('btjd').joinpath('tess_ephem.txt')
+ephemeris_data = np.genfromtxt(ephemeris_file)
 
 from wcs_build.step1_get_refimg_ctrlpts import gdPRF_calc, idx_filter, ring_background, flux_weighted_centroid
 
@@ -245,7 +246,7 @@ def fit_wcs(ras, decs, cols, rows, tmags, \
     xy = (sclObsCols, sclObsRows)
     radec = (ras, decs)
 
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
     cx = gwcs_obj.forward_transform[1]
     # polynomial fit object in y (row)
     cy = gwcs_obj.forward_transform[2]
@@ -291,7 +292,7 @@ def fit_wcs(ras, decs, cols, rows, tmags, \
     # refit with clipped data
     xy = (sclObsCols[idxgd], sclObsRows[idxgd])
     radec = (ras[idxgd], decs[idxgd])
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
     cx = gwcs_obj.forward_transform[1]
     # polynomial fit object in y (row)
     cy = gwcs_obj.forward_transform[2]
@@ -307,7 +308,7 @@ def fit_wcs(ras, decs, cols, rows, tmags, \
     raproj = newrefra
     decproj = newrefdec
     proj_point = SkyCoord(raproj, decproj, frame = 'icrs', unit=(u.deg, u.deg))
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
 
     # We have the wcs in polynomial form
     # now we need to convert it to SIP form

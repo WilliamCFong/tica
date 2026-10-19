@@ -541,7 +541,7 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
 
     xy = (sclObsCols, sclObsRows)
     radec = (kpRas, kpDecs)
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
     gwcs_pred_ras, gwcs_pred_decs = gwcs_obj(sclObsCols, sclObsRows)
     deg2Rad = np.pi/180.0
     deltaRas = (gwcs_pred_ras - kpRas) *3600.0 * np.cos(kpDecs*deg2Rad)
@@ -606,7 +606,7 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
 
     xy = (sclObsCols, sclObsRows)
     radec = (kpRas, kpDecs)
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
     gwcs_pred_ras, gwcs_pred_decs = gwcs_obj(sclObsCols, sclObsRows)
     deg2Rad = np.pi/180.0
     deltaRas = (gwcs_pred_ras - kpRas) *3600.0 * np.cos(kpDecs*deg2Rad)
@@ -724,7 +724,7 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
         xy = (sclObsCols[ia], sclObsRows[ia])
         radec = (kpRas[ia], kpDecs[ia])
         print('Start computing wcs')
-        gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+        gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
         # Iterate to find a better reference ra and dec
         #  such that there is no constant term in the polynomial fit
         newrefra, newrefdec = gwcs_obj(0.0, 0.0)
@@ -736,7 +736,7 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
         decproj = newrefdec
         proj_point = SkyCoord(raproj, decproj, frame = 'icrs', unit=(u.deg, u.deg))
         print('Start computing wcs')
-        gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+        gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
         gwcs_pred_ras, gwcs_pred_decs = gwcs_obj(sclObsCols, sclObsRows)
         deg2Rad = np.pi/180.0
         deltaRas = (gwcs_pred_ras - kpRas) *3600.0 * np.cos(kpDecs*deg2Rad)
