@@ -45,6 +45,8 @@ test: build-dev
 	$(COMPOSE) run --rm dev pytest
 
 reg-test: build-dev
+	# outputs left by a failed run already have a WCS, which changes the next fit
+	rm -f reg_test/*.cal.fits.gz
 	$(COMPOSE) run --rm -w /app/reg_test dev python run_reg_test.py
 
 shell: build-dev

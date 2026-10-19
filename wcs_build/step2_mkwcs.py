@@ -956,7 +956,7 @@ def worker( intuple):
                 # Determine background from 2 pixel ring around box
                 bkgLev = ring_background(sciImgCal)
                 #centOut = cent.centroid_com(sciImgCal-bkgLev)
-                centOut = flux_weighted_centroid(sciImgCal-bkgLev)
+                centOut = flux_weighted_centroid(sciImgCal - sciImgCal.dtype.type(bkgLev))
                 # centroid_com produces 0-based coordinates
                 newCol = centOut[0]+colX[0]
                 newRow = centOut[1]+rowY[0]
@@ -1009,7 +1009,7 @@ def worker( intuple):
                 # analysis region around target
                 sciImgCal = hdulistCal[0].data[midRow-blkHlfCent-1: midRow+blkHlfCent, midCol-blkHlfCent-1: midCol+blkHlfCent]
                 #centOut = cent.centroid_com(sciImgCal-bkgLev)
-                centOut = flux_weighted_centroid(sciImgCal-bkgLev)
+                centOut = flux_weighted_centroid(sciImgCal - sciImgCal.dtype.type(bkgLev))
  
  
                 # Once in blue moon centroids go nutsy check for it
