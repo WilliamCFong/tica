@@ -24,6 +24,8 @@ SCRIPTS = [
     "tica-trim-ccds2ffi",
     "tica-production-table",
     "tica-darktime",
+    "tica-check-delivery",
+    "tica-overclock-stats",
     "tica-wcs-step1",
     "tica-wcs-step2",
     "tica-dump-ephemeris",

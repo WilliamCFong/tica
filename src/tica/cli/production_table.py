@@ -1,12 +1,11 @@
-#!/usr/bin/env python
-
-import numpy as np
+import argparse
 import os
 import re
 import sys
-import h5py
-import argparse
 from datetime import datetime
+
+import h5py
+import numpy as np
 
 def calculate_step2_metrics(infile):
     d = h5py.File(infile,'r')
@@ -16,7 +15,7 @@ def calculate_step2_metrics(infile):
     try:
         good_frac =d['goodStarFracs'][:]
         frac95 = len(good_frac[ good_frac > 0.95])/len(good_frac)
-        
+
         m =  good_frac > 0.75
         avg_good_frac = np.mean(good_frac[m])
 
@@ -29,7 +28,7 @@ def calculate_step2_metrics(infile):
 
     avg_std_arcsec = np.mean( d['allStds'][:][m] )
     avg_std_pix = np.mean( d['allPixStds'][:][m] )
-    
+
     return frac95, avg_good_frac, avg_std_arcsec, avg_std_pix
 
 def calculate_step1_metrics(infile):
@@ -54,16 +53,16 @@ def test_output_dict(in_dict):
         #print(key,len(in_dict[key]))
         assert (len(in_dict[key]) == 16)
 
-    for key in ['tica_ver','py_ver', 'host', 
+    for key in ['tica_ver','py_ver', 'host',
                 'py_env', 'sector',
                 'wcs_sector',
-                'reffin', 
+                'reffin',
                 'flexible_apertures']:
 
         if len(in_dict[key]) == 0:
             continue
 
-        nan_mask = [True if type(e) == str else False for e in in_dict[key] ]
+        nan_mask = [True if type(e) is str else False for e in in_dict[key] ]
         if len(np.unique(np.array(in_dict[key])[nan_mask])) == 0:
             continue
         assert len(np.unique(np.array(in_dict[key])[nan_mask])) == 1
@@ -72,7 +71,7 @@ def test_output_dict(in_dict):
 
 
 def get_from_logs(infile):
-    
+
     with open(infile,'r') as fout:
         #first line says when we started, should be tica verson
         fline = fout.readline()
@@ -113,44 +112,44 @@ def get_from_logs(infile):
                 tica_ver_reg = re.search('TICA version: (.*)',fline)
                 tica_ver_working = tica_ver_reg.group(1)
             if 'Python version:' in fline:
-                py_ver_reg = re.search('Python version: (.*) \(',fline)
-                py_ver_working =  py_ver_reg.group(1) 
+                py_ver_reg = re.search(r'Python version: (.*) \(',fline)
+                py_ver_working =  py_ver_reg.group(1)
             if 'Host:' in fline:
                 host_reg = re.search('Host: (.*)',fline)
                 host_working =  host_reg.group(1)
             if 'python environment:' in fline:
                 py_env_reg = re.search('python environment:  (.*)',fline)
-                py_env_working =  py_env_reg.group(1) 
+                py_env_working =  py_env_reg.group(1)
 
             if 'sector = ' in fline:
-                wcs_sector_reg = re.search('sector = (\d\d)',fline)
-                wcs_sector_working =  wcs_sector_reg.group(1) 
+                wcs_sector_reg = re.search(r'sector = (\d\d)',fline)
+                wcs_sector_working =  wcs_sector_reg.group(1)
 
 
             if 'working directory' in fline:
-                sector_reg = re.search('/sector(\d\d)/',fline)
+                sector_reg = re.search(r'/sector(\d\d)/',fline)
 
-                cam_reg = re.search('/cam(\d)_ccd(\d)',fline)
-                cam = cam_reg.group(1) 
-                ccd = cam_reg.group(2) 
+                cam_reg = re.search(r'/cam(\d)_ccd(\d)',fline)
+                cam = cam_reg.group(1)
+                ccd = cam_reg.group(2)
                 #set idx and previous variables
                 map_idx = 4*(int(cam) -1) + ( int(ccd) -1)
                 tica_ver[map_idx] = tica_ver_working
                 py_ver[map_idx] = py_ver_working
                 host[map_idx] = host_working
                 py_env[map_idx] = py_env_working
-                sector[map_idx] = sector_reg.group(1) 
+                sector[map_idx] = sector_reg.group(1)
 
 
             #wcs log pattern
             if 'camera = ' in fline:
                 #we should always see a ccd line next
-                cam_reg = re.search('camera = (\d)',fline)
-                cam = cam_reg.group(1) 
+                cam_reg = re.search(r'camera = (\d)',fline)
+                cam = cam_reg.group(1)
             #wcs log pattern
             if 'ccd = ' in fline:
-                ccd_reg = re.search('ccd = (\d)',fline)
-                ccd = ccd_reg.group(1) 
+                ccd_reg = re.search(r'ccd = (\d)',fline)
+                ccd = ccd_reg.group(1)
 
                 #set idx and previous variables
                 map_idx = 4*(int(cam) -1) + ( int(ccd) -1)
@@ -161,10 +160,10 @@ def get_from_logs(infile):
                 wcs_sector[map_idx] = wcs_sector_working
 
             if 'N Pools' in fline:
-                pool_reg = re.search('N Pools = (\d+)',fline)
+                pool_reg = re.search(r'N Pools = (\d+)',fline)
                 N_pools[map_idx] =  pool_reg.group(1)
             if 'parallel = ' in fline:
-                parallel_reg = re.search('parallel = (\d+)',fline)
+                parallel_reg = re.search(r'parallel = (\d+)',fline)
                 parallel[map_idx] =  parallel_reg.group(1)
             if 'Runtime:' in fline:
                 runtime_reg = re.search('Runtime: (.*)sec',fline)
@@ -175,30 +174,30 @@ def get_from_logs(infile):
                 if 'fits' not in fline:
                     continue
                 ref_reg = re.search('refimage = (.*)',fline)
-                ref[map_idx] =  ref_reg.group(1) 
-                reffin_reg = re.search('-(\d\d\d\d\d\d\d\d)-',ref[map_idx])
-                reffin[map_idx] =  reffin_reg.group(1) 
+                ref[map_idx] =  ref_reg.group(1)
+                reffin_reg = re.search(r'-(\d\d\d\d\d\d\d\d)-',ref[map_idx])
+                reffin[map_idx] =  reffin_reg.group(1)
             if 'wing = ' in fline:
                 wing_reg = re.search('wing = (.*)',fline)
-                wing[map_idx] =  wing_reg.group(1) 
+                wing[map_idx] =  wing_reg.group(1)
             if 'contrast = ' in fline:
                 contrast_reg = re.search('contrast = (.*)',fline)
-                contrast[map_idx] =  contrast_reg.group(1) 
+                contrast[map_idx] =  contrast_reg.group(1)
             if 'ref targets,' in fline and 'nTrim:' in fline:
-                reg1 = re.search('(\d*) ref targets',fline)                
+                reg1 = re.search(r'(\d*) ref targets',fline)
                 N_ref_targets[map_idx] =  reg1.group(1)
-                
+
                 reg1 = re.search('bright (.*) faint',fline)
                 ref_bright_fit_res[map_idx] = reg1.group(1)
 
                 reg1 = re.search('faint (.*) nTrim:',fline)
                 ref_faint_fit_res[map_idx] = reg1.group(1)
-                
-                reg1 = re.search('nTrim: (\d*)',fline)
+
+                reg1 = re.search(r'nTrim: (\d*)',fline)
                 N_ref_trim_targ[map_idx] = reg1.group(1)
 
             if 'Using ' in fline and ' apertures.' in fline:
-                reg1 = re.search('Using (\w*) apertures.',fline)
+                reg1 = re.search(r'Using (\w*) apertures.',fline)
                 flexible_apertures[map_idx] = reg1.group(1)
 
 
@@ -206,20 +205,20 @@ def get_from_logs(infile):
         end_date, end_time = message[0], message[1]
 
 
-        outputdict = {'start_date': start_date + '-' + start_time, 
+        outputdict = {'start_date': start_date + '-' + start_time,
                       'end_date'  : end_date + '-' + end_time,
                       'tica_ver':tica_ver,
-                      'py_ver':py_ver, 
+                      'py_ver':py_ver,
                       'host':host,
                       'py_env':py_env,
                       'sector':sector,
                       'N_pool':N_pools,
                       'parallel' : parallel,
                       'runtime':runtime,
-                      'wcs_sector':wcs_sector, 
-                      'ref':ref, 
+                      'wcs_sector':wcs_sector,
+                      'ref':ref,
                       'reffin':reffin,
-                      'wing':wing, 
+                      'wing':wing,
                       'contrast':contrast,
                       'N_ref_targets':N_ref_targets,
                       'ref_bright_fit_res':ref_bright_fit_res,
@@ -233,18 +232,34 @@ def get_from_logs(infile):
         return outputdict
 
 
-        
+def build_parser():
+    description_string = """
+
+    This script scrapes logs in the tica production directories, and updates the Markdown table in the github repo.
+
+    """
+
+    parser = argparse.ArgumentParser(prog='tica-production-table', description=description_string)
+    parser.add_argument("-s", "--segments", type=str,
+                        help="Segments of sector; orbit 1 or 2 in EM1,"
+                        "o1a, o1b, o2a, or o2b in EM2.  Can only enter one segment at a time.")
+    parser.add_argument("--wcs1", action='store_true',
+                        help="If set, scrape the tica_wcs_step1.log file and populate columns.")
+    parser.add_argument("-o", "--output", default='production_table.md',
+                        help="Markdown table to append to; created with a header if it does "
+                        "not exist (default: production_table.md in the current directory)")
+    return parser
 
 
-if __name__ == "__main__":
+def main(argv=None):
     #assume that the working directory is a standard run
     #columns:
 
     #TICA params
     #time start, time stop, ncores, runtime
     #TICA version, python version, Host, environment
-    #sector, orbit(s), 
-    
+    #sector, orbit(s),
+
 
     #wcs step1 params
     #time start, time stop, Runtime
@@ -256,29 +271,14 @@ if __name__ == "__main__":
     #time start, time stop, Runtime
     #TICA version, python version, Host, environment
     #sector
-    
+
 
     #per ccd
     # step1: N_ref targets, N_bright ref targets, Ntrim, reference fit resid bright,
-    #step 2: average GdFrac, frac goodFrac > 0.99, 
+    #step 2: average GdFrac, frac goodFrac > 0.99,
     #average stds arcsec (all), average std pixel (all)
 
-    description_string = """
-
-    This script scrapes logs in the tica production directories, and updates the Markdown table in the github repo.
-
-    """
-
-    parser = argparse.ArgumentParser(prog='tica-production-table', description=description_string)
-    parser.add_argument("-s", "--segments", type=str, 
-                        help="Segments of sector; orbit 1 or 2 in EM1,"
-                        "o1a, o1b, o2a, or o2b in EM2.  Can only enter one segment at a time.")
-    parser.add_argument("--wcs1", action='store_true',
-                        help="If set, scrape the tica_wcs_step1.log file and populate columns.")
-    args = parser.parse_args()
-
-
-
+    args = build_parser().parse_args(argv)
 
     head_labels = ['Sector','Segment',
                    'Date Start','Date End','Total Time (days)',
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     #align right
     align_list[4] = '---:'   #total time
     align_list[10] = '---:'  #tica runtime
-    align_list[11] = '---:'  #N cores 
+    align_list[11] = '---:'  #N cores
     align_list[12] = '---:'  #WCS2 Runtime
     align_list[13] = '---:'  #N cores
     align_list[14] = '---:'  #frac with 0.95
@@ -317,15 +317,13 @@ if __name__ == "__main__":
     align_list[26] = '---:'  #Ntrim
     align_list[27] = '---:'  #bright res
 
-    
+
 
     align_list.append('')
     align_list.insert(0,'')
     align = '|'.join(align_list)
 
-    outdir = os.path.abspath(os.path.dirname(
-        os.path.dirname(__file__)) )
-    outfile = os.path.join(outdir,'production_table.md')
+    outfile = args.output
     if os.path.isfile(outfile):
         pass
     else:
@@ -335,13 +333,12 @@ if __name__ == "__main__":
 
 
     #load up the data
-    orbit_string = ''        
 
 
     out = get_from_logs('tica_logs/{}_tica.log'.format(args.segments) )
     test_output_dict(out)
     start_date = out['start_date']
-    start_date_object = datetime.strptime(out['start_date'],'%Y.%m.%d-%H:%M:%S')
+    datetime.strptime(out['start_date'],'%Y.%m.%d-%H:%M:%S')
     #datetime.strptime(s,'%Y.%m.%d-%H:%M:%S')
     #get timedelta, and then duration is
     #dt.days*86400 + dt.seconds
@@ -394,9 +391,9 @@ if __name__ == "__main__":
                 end_date_object1 = datetime.strptime(out3[-1]['end_date'],'%Y.%m.%d-%H:%M:%S')
 
 
-    #check that these are the same across all logs    
+    #check that these are the same across all logs
     #'Sector','TICA version','Python version',
-    #'Host','Environment','Flexibel Apertures', 
+    #'Host','Environment','Flexibel Apertures',
     if out2 is not None:
         for s in out2:
             assert out['sector'] == s['wcs_sector']
@@ -405,20 +402,20 @@ if __name__ == "__main__":
             assert out['sector'] == s['wcs_sector']
 
     for key in ['tica_ver','py_ver','host','py_env']:
-        
+
         if out2 is not None:
             for s in out2:
                 try:
                     assert out[key] == s[key]
-                except AssertionError as e:
-                    print('Warning!! key {} in wcs step1 {} not equal to {}'.format(s[key], out[key]))
-                
+                except AssertionError:
+                    print('Warning!! key {} in wcs step1 {} not equal to {}'.format(key, s[key], out[key]))
+
         for s in out3:
             try:
-                assert out[key] == s[key], print(key, out[key], s[key])
-            except AssertionError as e:
-                print('Warning!! key {} in wcs step2 {} not equal to {}'.format(s[key], out[key]))
-                            
+                assert out[key] == s[key]
+            except AssertionError:
+                print('Warning!! key {} in wcs step2 {} not equal to {}'.format(key, s[key], out[key]))
+
 
     t1 = datetime.strptime(start_date,'%Y.%m.%d-%H:%M:%S')
     t2 = datetime.strptime(end_date,'%Y.%m.%d-%H:%M:%S')
@@ -428,8 +425,8 @@ if __name__ == "__main__":
         for jj in [0,1,2,3]:
             if ii == 0 and jj == 0:
                 #print(orbit_string, orbit_string.replace('_',''))
-                outline_list = [ '{:>04d}'.format( int(out['sector'])), 
-                                 '{:>35s}'.format( args.segments), 
+                outline_list = [ '{:>04d}'.format( int(out['sector'])),
+                                 '{:>35s}'.format( args.segments),
                                  '{:>35s}'.format(start_date),
                                  '{:>35s}'.format(end_date),
                                  '{:>35.3f}'.format( (dt.days*86400 + dt.seconds)/86400 ),
@@ -437,13 +434,13 @@ if __name__ == "__main__":
                                  '{:>35s}'.format(out['py_ver']),
                                  '{:>35s}'.format(out['host']),
                                  '{:>35s}'.format(out['py_env']), ]
-                        
+
             else:
                 outline_list = ['{:>35s}'.format('') for _ in range(9)]
                 #if one ever wanted to load the table into pandas or numpy,
                 #useful to match a sector for each ccd
                 outline_list[0] = '{:>04d}'.format( int(out['sector']))
-                outline_list[1] = '{:>35s}'.format( args.segments ) 
+                outline_list[1] = '{:>35s}'.format( args.segments )
 
             idx = 4*ii + jj
             outline_list.append('{:>35s}'.format('cam{}_ccd{}'.format(ii+1,jj+1 )))
@@ -452,11 +449,11 @@ if __name__ == "__main__":
                 outline_list.append( '{:>35s}'.format(out['N_pool'][idx]) )
             else:
                 outline_list.append('{:>35s}'.format(''))
-                outline_list.append('{:>35s}'.format(''))           
+                outline_list.append('{:>35s}'.format(''))
 
             outline_list.append( '{:>35s}'.format(out3[idx]['runtime'][idx] ))
             #outline_list.append( '{:>35d}'.format(1))
-            
+
             outline_list.append( '{:>35s}'.format(out3[idx]['parallel'][idx] ))
 
             outline_list.append('{:>.2f}'.format(wcs_data[idx][0]))
@@ -498,9 +495,14 @@ if __name__ == "__main__":
 
             outline_list.append('')
             outline_list.insert(0,'')
-            outline = '|'.join(outline_list)                    
-            
+            outline = '|'.join(outline_list)
+
 
             #print(outline)
             with open(outfile,'a') as fout:
                 fout.write(outline +'\n')
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

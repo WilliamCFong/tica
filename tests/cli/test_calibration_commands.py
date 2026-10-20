@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from tica.cli import _common, cal_ccd2ccd, ccds2ffi
+from tica.cli import _common, cal_ccd2ccd, cal_ffi2ccds, ccds2ffi
 
 REPO = Path(__file__).resolve().parents[2]
 REG_INPUT = REPO / "reg_test" / "input"
@@ -98,3 +98,44 @@ def test_trim_ccds2ffi_restores_border(tmp_path):
     assert frame.shape == (4156, 4272)
     np.testing.assert_array_equal(frame[:2048, 44:2092], images[2])
     assert not frame[:2048, :44].any()
+
+
+def write_synthetic_camera_ffi(path, fin, cam=1, starttjd=1234.5):
+    """A full-camera FFI in POC format: 4 CCDs with overclock/underclock pixels."""
+    rng = np.random.default_rng(fin)
+    data = rng.normal(6000, 30, (4156, 4272)).astype(np.float32)
+    hdr = fits.Header({"CAM": cam, "INT_TIME": 600, "STARTTJD": starttjd})
+    name = path / "tess2025001000000-{:08d}-{}-crm-ffi.fits".format(fin, cam)
+    fits.writeto(name, data, hdr)
+    return name
+
+
+needs_10min_models = pytest.mark.skipif(
+    not (CALDIR_10MIN / "twodbias" / "cam1_ccd1_twoDcorrect.fits").exists(),
+    reason="10-minute calibration models not pulled with DVC",
+)
+
+
+@needs_10min_models
+def test_cal_ffi2ccds_splits_and_records_diagnostics(tmp_path):
+    raw = [write_synthetic_camera_ffi(tmp_path, fin) for fin in (100002, 100001)]
+    inlist = tmp_path / "inlist"
+    inlist.write_text("".join(str(f) + "\n" for f in raw))
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+
+    rc = cal_ffi2ccds.main([str(inlist), "--outdir", str(outdir), "--caldir", str(CALDIR_10MIN),
+                            "--parallel", "2", "--orb_seg", "o1a", "--no_gzip",
+                            "--log", str(tmp_path / "logs" / "o1a_tica.log")])
+
+    assert rc == 0
+    outputs = sorted(p.name for p in outdir.glob("*.cal.fits"))
+    assert len(outputs) == 8
+    hdr = fits.getheader(outdir / "tess2025001000000-00100001-1-crm-ffi_ccd3.cal.fits")
+    assert hdr["ORB_SEG"] == "o1a"
+    rows = (outdir / "cal_timeseries.txt").read_text().splitlines()
+    assert rows[0].split()[:2] == ["name", "mode_ccd1"]
+    assert [r.split()[0] for r in rows[1:]] == [f.name for f in sorted(raw)]
+    log = (tmp_path / "logs" / "o1a_tica.log").read_text()
+    assert log.splitlines()[0].split()[2:4] == ["TICA", "version:"]
+    assert "N Pools = 2" in log

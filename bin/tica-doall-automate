@@ -293,9 +293,9 @@ if [[ $errorflag -eq 0 ]]; then
 
     
     if [[ $segment =~ "o1a" ]]; then
-	tica-production-table --segments $segment --wcs1
+	tica-production-table --segments $segment --wcs1 --output /pdo/users/faus/python/tica/production_table.md
     else
-	tica-production-table --segments $segment
+	tica-production-table --segments $segment --output /pdo/users/faus/python/tica/production_table.md
     fi
     
 elif [[ $errorflag -eq 1 ]]; then
