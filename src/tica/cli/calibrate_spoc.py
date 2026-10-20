@@ -35,8 +35,8 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
 
     input_dir_use = os.path.realpath(args.input_dir)
-    #make in list for tica
-    with open('inlist', 'a') as fout:
+    #make in list for tica, replacing any list from an earlier run
+    with open('inlist', 'w') as fout:
         for i in range(1, 5):
             for j in range(1, 5):
                 for f in _common.sorted_glob('{}/tess*-{}-{}-*ffir*fits*'.format(input_dir_use, i, j)):

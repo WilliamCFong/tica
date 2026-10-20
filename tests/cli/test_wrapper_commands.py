@@ -118,6 +118,7 @@ def test_calibrate_spoc_lists_ffir_files(tmp_path, monkeypatch, recorder):
     (raw / "tess2021041025908-s0035-1-1-0205-s_ffic.fits.gz").touch()
     work = tmp_path / "work"
     work.mkdir()
+    (work / "inlist").write_text("left-over-from-an-earlier-run.fits\n")
     monkeypatch.chdir(work)
 
     assert calibrate_spoc.main(["--input-dir", "../raw", "--caldir", "../cal", "--ncores", "3"]) == 0
