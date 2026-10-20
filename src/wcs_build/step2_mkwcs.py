@@ -20,11 +20,8 @@ from gwcs.wcstools import wcs_from_points
 from gwcs.wcs import WCS as WCS_gwcs
 from gwcs.coordinate_frames import *
 import glob
-import sys
 from multiprocessing import Pool
 
-DIR = os.path.abspath(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join( DIR,'..'))
 from btjd.btjd_correction import btjd_correction
 from importlib.resources import files
 ephemeris_file = files('btjd').joinpath('tess_ephem.txt')

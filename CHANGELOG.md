@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 ### Changed
 - The `tica`, `btjd`, and `wcs_build` packages moved to `src/` (src layout), so tests and scripts import the installed package rather than the checkout. Import names are unchanged. Existing checkouts need `pip install -e .` again. Production must also move the git-ignored `wcs_build/tic_postgres_param.py` to `src/wcs_build/`. `tica-doall-automate` now writes the ephemeris to `src/btjd/`.
+- Scripts no longer add the repository to `sys.path`; they import the installed package.
 - Require gwcs>=1.0. `wcs_from_points` is now called with a `SkyCoord` and `poly_degree`; WCS fits are bit-identical to gwcs 0.16. The previous pin (`<0.19`) allowed gwcs versions that broke WCS fitting and depended on the removed `pkg_resources`.
 - `tica.tica.version` comes from the package metadata instead of reading `VERSION` from the source tree, so non-editable installs work.
 - `step2_mkwcs.py` loads `tess_ephem.txt` from the installed `btjd` package, so the installed script works outside the repository.

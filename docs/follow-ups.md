@@ -28,8 +28,8 @@ This script runs the TICA production pipeline on MIT's POC machines. It finds th
 ## Packaging
 
 11. **Internal operations scripts are installed for every user.** `pyproject.toml` installs `tica-doall-automate`, `tica-stage-delivery`, and `tica-check-delivery` into every environment, although they only work on MIT systems. Consider leaving them out of `script-files`, or installing them only through an `ops` extra.
-12. **`bin/tica-overclock-stats` is not installed** and inserts a hardcoded `/pcds/users/faus/tica/` into `sys.path`. Remove it, or fix and install it.
-13. **The scripts in `bin/` still modify `sys.path`** (`sys.path.insert(0, DIR/..)`). This is no longer needed once the package is installed, and it can make a script import a different copy of `tica` than the installed one. The README no longer documents running from a bare checkout via `PYTHONPATH`, so these lines can probably be removed. First confirm that no production setup relies on them.
+12. **`bin/tica-overclock-stats` is not installed** and doesn't work (it uses `sp.`-prefixed numpy functions that SciPy no longer provides). Its hardcoded `/pcds/users/faus/tica/` import path has been removed. Remove the script, or fix and install it.
+13. ~~**The scripts in `bin/` still modify `sys.path`**~~ *Fixed: removed after the move to the src layout.* (`sys.path.insert(0, DIR/..)`). This is no longer needed once the package is installed, and it can make a script import a different copy of `tica` than the installed one. The README no longer documents running from a bare checkout via `PYTHONPATH`, so these lines can probably be removed. First confirm that no production setup relies on them.
 
 ## Code health
 
