@@ -35,6 +35,7 @@ SCRIPTS = [
     "tica-wcs-step2-allcam-allccd",
     "tica-wcs-spoc",
     "tica-stage-delivery",
+    "tica-doall-automate",
 ]
 
 

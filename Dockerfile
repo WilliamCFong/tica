@@ -25,7 +25,6 @@ COPY requirements.lock ./
 RUN pip install --require-hashes --no-deps -r requirements.lock
 COPY pyproject.toml VERSION README.md LICENSE ./
 COPY src/ src/
-COPY bin/ bin/
 RUN pip install --no-deps . \
     && pip check \
     && rm -rf build *.egg-info
@@ -49,9 +48,7 @@ RUN pip install --require-hashes --no-deps -r requirements-dev.lock
 WORKDIR /app
 COPY pyproject.toml VERSION README.md LICENSE ./
 COPY src/ src/
-COPY bin/ bin/
-# Editable install: the checkout bind-mounted over /app is what gets imported.
-# Scripts are copied at install time, so prefer the live ones from the checkout.
+# Editable install: the checkout bind-mounted over /app is what gets imported,
+# including by the tica-* commands.
 RUN pip install --no-deps -e . && pip check
-ENV PATH="/app/bin:/app/btjd:${PATH}"
 CMD ["bash"]

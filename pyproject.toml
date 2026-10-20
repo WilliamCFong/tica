@@ -61,6 +61,7 @@ tica-wcs-step1-allcam-allccd = "tica.cli.wcs_step1_allccd:main"
 tica-wcs-step2-allcam-allccd = "tica.cli.wcs_step2_allccd:main"
 tica-wcs-spoc = "tica.cli.wcs_spoc:main"
 tica-stage-delivery = "tica.cli.stage_delivery:main"
+tica-doall-automate = "tica.cli.doall_automate:main"
 
 [project.urls]
 Homepage = "https://tessgit.mit.edu/tica/tica"
@@ -70,9 +71,6 @@ Documentation = "https://archive.stsci.edu/hlsp/tica"
 [tool.setuptools]
 package-dir = {"" = "src"}
 packages = ["tica", "tica.cli", "btjd", "wcs_build"]
-script-files = [
-    "bin/tica-doall-automate",
-]
 
 [tool.setuptools.dynamic]
 version = {file = "VERSION"}

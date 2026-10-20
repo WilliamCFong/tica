@@ -60,15 +60,11 @@ lock:
 ifndef $PREFIX
 PREFIX=/opt/tica
 endif
+# installs the package and the tica-* commands under $(PREFIX) (bin/ and lib/)
 install:
-	mkdir $(PREFIX)
-	rsync -arv bin $(PREFIX)
-	rsync -arv src/tica $(PREFIX)
-#	rsync -arv examples $(PREFIX)
+	python -m pip install --no-deps --prefix $(PREFIX) .
 	rsync -arv calibration_* $(PREFIX)
 	cp -p README.md LICENSE AUTHORS $(PREFIX)
-	find $(PREFIX) -name "*~" -exec rm {} \;
-	python -m compileall $(PREFIX)/tica
 
 release:
 	make install PREFIX=$(RELDIR)/$(RELEASE_LABEL)
