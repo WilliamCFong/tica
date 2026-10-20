@@ -31,10 +31,22 @@ def test_read_file_list_missing_exits_1(tmp_path):
     assert exc.value.code == 1
 
 
-def test_load_calibration_requires_caldir():
+@pytest.mark.parametrize("caldir", [None, "/no/such/calibration_10min"])
+def test_load_calibration_exits_2_for_unusable_caldir(caldir):
     with pytest.raises(SystemExit) as exc:
-        _common.load_calibration(None)
-    assert exc.value.code == 1
+        _common.load_calibration(caldir)
+    assert exc.value.code == 2
+
+
+def test_cal_ffi2ccds_exits_2_for_unnamed_caldir(tmp_path, capsys):
+    caldir = tmp_path / "tica-calibration-models"
+    caldir.mkdir()
+    inlist = tmp_path / "inlist"
+    inlist.write_text("x.fits\n")
+    with pytest.raises(SystemExit) as exc:
+        cal_ffi2ccds.main([str(inlist), "--caldir", str(caldir), "--log", str(tmp_path / "log")])
+    assert exc.value.code == 2
+    assert "must end in _<cadence>" in capsys.readouterr().err
 
 
 def _fail_on_two(item):

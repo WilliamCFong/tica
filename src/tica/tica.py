@@ -99,6 +99,52 @@ class Sector(object):
             return rebin        
 
 
+class CalibrationError(ValueError):
+    """The calibration directory is unusable (wrong name or missing models)."""
+
+
+# exposure time in seconds, keyed by the suffix of the calibration directory name
+CALIBRATION_INT_TIMES = (('30min', 1800), ('10min', 600), ('02min', 120),
+                         ('20sec', 20), ('200sec', 200))
+
+
+def check_calibration_dir(calibration_dir):
+    """Check a calibration directory and return its exposure time in seconds.
+
+    The exposure time comes from the directory name, which must end in
+    _<cadence> (e.g. calibration_200sec), and the directory must contain
+    twodbias/cam<i>_ccd<j>_twoDcorrect.fits and
+    flatfields/cam<i>_ccd<j>_image.fits for all 16 CCDs. Raises
+    CalibrationError otherwise.
+    """
+    if not calibration_dir:
+        raise CalibrationError("No calibration directory given.  Choose the calibration "
+                               "models for the exposure time, e.g. calibration_200sec.")
+    if not os.path.isdir(calibration_dir):
+        raise CalibrationError("Calibration directory not found: {}".format(calibration_dir))
+
+    int_time_key = calibration_dir.split('_')[-1]
+    for suffix, int_time in CALIBRATION_INT_TIMES:
+        if suffix in int_time_key:
+            break
+    else:
+        raise CalibrationError(
+            "Cannot tell the exposure time of the calibration models in {}: the directory "
+            "name must end in _<cadence>, one of {} (e.g. calibration_200sec).".format(
+                calibration_dir, ', '.join(s for s, _ in CALIBRATION_INT_TIMES)))
+
+    missing = [os.path.join(calibration_dir, sub, name.format(cam, ccd))
+               for sub, name in (('twodbias', 'cam{}_ccd{}_twoDcorrect.fits'),
+                                 ('flatfields', 'cam{}_ccd{}_image.fits'))
+               for cam in range(1, 5) for ccd in range(1, 5)
+               if not os.path.exists(os.path.join(calibration_dir, sub, name.format(cam, ccd)))]
+    if missing:
+        raise CalibrationError(
+            "{} of 32 calibration model files are missing from {} (were they pulled with "
+            "DVC?), e.g. {}".format(len(missing), calibration_dir, ', '.join(missing[:3])))
+    return int_time
+
+
 class Calibration(object):
     """Class to handle initialization of calibration models so it is
     performed just once
@@ -120,25 +166,11 @@ class Calibration(object):
             logger.debug("FITS calibration file not found: {}".format( fits_file ) )
             return None
 
-    def __init__(self, calibration_dir=None):
+    def __init__(self, calibration_dir):
 
         self.logger = logging.getLogger(__name__)
-        
-        if not calibration_dir:
-            top_level_path=os.path.abspath(os.path.dirname(__file__))
-            calibration_dir = os.path.abspath(os.path.join(top_level_path, "../calibration/"))
-        
-        int_time_key = calibration_dir.split('_')[-1]
-        if '30min' in int_time_key:
-            self.int_time = 1800
-        elif '10min' in int_time_key:
-            self.int_time = 600
-        elif '02min' in int_time_key:
-            self.int_time = 120
-        elif '20sec' in int_time_key:
-            self.int_time = 20
-        elif '200sec' in int_time_key:
-            self.int_time = 200
+
+        self.int_time = check_calibration_dir(calibration_dir)
 
         twodbias_dir = os.path.join(calibration_dir, 'twodbias/')
         twodbias_files = {'cam1':{'ccd1':'cam1_ccd1_twoDcorrect.fits',
@@ -206,11 +238,8 @@ class CCD(object):
         # get logger
         self.logger = logging.getLogger(__name__)
 
-        # if no calibration object provided, create one
-        if calibration:
-            self.calibration = calibration
-        else:
-            self.calibration = Calibration()
+        # None for CCDs that are only split, combined, or used as containers
+        self.calibration = calibration
             
         self.ccdnum = None
         self.camnum = None
@@ -282,6 +311,7 @@ class CCD(object):
             raise Exception("Must specify CCD number to calibrate!")
         if self.camnum == None:
             raise Exception("Must specify camera number to calibrate!")
+        self._require_calibration()
 
         #here, it's a CCD object
         out = CCD(self.get_frame())
@@ -331,12 +361,18 @@ class CCD(object):
     # Algorithms for calibration
     #===========================
 
+    def _require_calibration(self):
+        if self.calibration is None:
+            raise CalibrationError("This CCD was created without calibration models; "
+                                   "pass calibration=Calibration(<calibration dir>).")
+        return self.calibration
+
     def twod_correct(self, out, camuse, ccduse):
-        caldata = self.calibration.get_twodbias(camuse, ccduse)
+        caldata = self._require_calibration().get_twodbias(camuse, ccduse)
         return out - caldata
 
     def flatfield_correct(self, out, camuse, ccduse):
-        caldata = self.calibration.get_flatfields(camuse, ccduse)
+        caldata = self._require_calibration().get_flatfields(camuse, ccduse)
         return out/caldata
 
     def smear_correct(self, out):

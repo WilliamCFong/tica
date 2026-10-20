@@ -115,8 +115,9 @@ def main(argv=None):
     if not os.path.isdir(args.dstem):
         print("Configuration Error. dstem is not a directory.")
         return 2
-    if not os.path.isdir(args.caldir):
-        print("Configuration Error. CALDIR is not a directory.")
+    error = _common.caldir_error(args.caldir)
+    if error:
+        print("Configuration Error. {}".format(error))
         return 2
     dstem = os.path.abspath(args.dstem)
     caldir = os.path.abspath(args.caldir)
