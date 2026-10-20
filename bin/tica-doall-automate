@@ -166,8 +166,8 @@ pwd
 echo "Running tica-calibrate-tso..."
 #if [[ $segment =~ "o1" ]]; then
 if [[ $mod -eq 1 ]]; then
-    tica-calibrate-tso o1="$orbit" o2="None" orbseg="$segment" dstem="$dstem" \
-	CALDIR="$CALDIR" NCORES="$NCORES" || {  
+    tica-calibrate-tso --o1 "$orbit" --o2 None --orbseg "$segment" --dstem "$dstem" \
+	--caldir "$CALDIR" --ncores "$NCORES" || {  
 	rc=$?
 	if [[ $rc == 2 ]]; then
 	    echo "Configuration error running tica-calibrate-tso, exiting.";
@@ -185,8 +185,8 @@ if [[ $mod -eq 1 ]]; then
     }
 #elif [[ $segment =~ "o2" ]]; then
 elif [[ $mod -eq 0 ]]; then
-    tica-calibrate-tso o1="None" o2="$orbit" orbseg="$segment" dstem="$dstem" \
-	CALDIR="$CALDIR" NCORES="$NCORES" || {  
+    tica-calibrate-tso --o1 None --o2 "$orbit" --orbseg "$segment" --dstem "$dstem" \
+	--caldir "$CALDIR" --ncores "$NCORES" || {  
 	rc=$?
 	if [[ $rc == 2 ]]; then
             echo "Configuration error running tica-calibrate-tso, exiting.";
@@ -214,7 +214,7 @@ fi
 
 if [[ $segment =~ "o1a" ]]; then
     echo "Running tica-wcs-step1-allcam-allccd..."
-    tica-wcs-step1-allcam-allccd SECTOR="$SECTOR" dstem="./" REFFIN="$reffin" ||{
+    tica-wcs-step1-allcam-allccd --sector "$SECTOR" --dstem "./" --reffin "$reffin" ||{
 	rc=$?
 	if [[ $rc == 2 ]]; then
             echo "Configuration error running tica-wcs-step1-allcam-allccd, exiting.";
@@ -234,7 +234,7 @@ fi
 
 
 echo "Running tica-wcs-step2-allcam-allccd..."
-tica-wcs-step2-allcam-allccd SECTOR="$SECTOR" dstem="./" NCORES="$NCORES2" ||{  
+tica-wcs-step2-allcam-allccd --sector "$SECTOR" --dstem "./" --ncores "$NCORES2" ||{  
     rc=$?
     if [[ $rc == 2 ]]; then
         echo "Configuration error running tica-wcs-step2-allcam-allccd, exiting.";

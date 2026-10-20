@@ -139,3 +139,9 @@ def test_cal_ffi2ccds_splits_and_records_diagnostics(tmp_path):
     log = (tmp_path / "logs" / "o1a_tica.log").read_text()
     assert log.splitlines()[0].split()[2:4] == ["TICA", "version:"]
     assert "N Pools = 2" in log
+
+
+def test_run_command_and_run_parallel_return_exit_codes(tmp_path):
+    assert _common.run_command("cal_ccd2ccd", ["--help"], cwd=tmp_path) == 0
+    assert _common.run_parallel([("cal_ccd2ccd", ["--help"]),
+                                 ("cal_ccd2ccd", ["--no-such-option"])]) == [0, 2]

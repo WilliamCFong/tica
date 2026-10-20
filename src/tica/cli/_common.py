@@ -1,5 +1,6 @@
 """Helpers shared by the TICA command-line tools."""
 
+import glob
 import logging
 import os
 import subprocess
@@ -114,12 +115,34 @@ def setup_run_logging(prog, args, log, debug=False, log_cwd=True, skip=()):
             logger.info('     {} = {}'.format(key, value))
 
 
-def run_command(module, args):
+def _command(module, args):
+    return [sys.executable, "-m", "tica.cli." + module] + [str(a) for a in args]
+
+
+def run_command(module, args, cwd=None):
     """Run ``python -m tica.cli.<module> <args>`` and return its exit code.
 
     The orchestration commands run their steps through this function, so each
     step gets its own process (and logging setup), as the shell scripts did.
     """
-    cmd = [sys.executable, "-m", "tica.cli." + module] + [str(a) for a in args]
+    cmd = _command(module, args)
     logger.debug("running %s", " ".join(cmd))
-    return subprocess.run(cmd).returncode
+    return subprocess.run(cmd, cwd=cwd).returncode
+
+
+def run_parallel(jobs, cwd=None):
+    """Run several (module, args) commands at once; return their exit codes.
+
+    This replaces the shell pattern ``cmd & ... wait``.
+    """
+    procs = []
+    for module, args in jobs:
+        cmd = _command(module, args)
+        logger.debug("starting %s", " ".join(cmd))
+        procs.append(subprocess.Popen(cmd, cwd=cwd))
+    return [proc.wait() for proc in procs]
+
+
+def sorted_glob(pattern):
+    """Matching paths in the order `ls` lists them."""
+    return sorted(glob.glob(pattern))

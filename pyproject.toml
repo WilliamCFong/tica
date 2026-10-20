@@ -55,6 +55,12 @@ tica-darktime = "tica.cli.darktime:main"
 tica-check-delivery = "tica.cli.check_delivery:main"
 tica-production-table = "tica.cli.production_table:main"
 tica-overclock-stats = "tica.cli.overclock_stats:main"
+tica-calibrate-spoc = "tica.cli.calibrate_spoc:main"
+tica-calibrate-tso = "tica.cli.calibrate_tso:main"
+tica-wcs-step1-allcam-allccd = "tica.cli.wcs_step1_allccd:main"
+tica-wcs-step2-allcam-allccd = "tica.cli.wcs_step2_allccd:main"
+tica-wcs-spoc = "tica.cli.wcs_spoc:main"
+tica-stage-delivery = "tica.cli.stage_delivery:main"
 
 [project.urls]
 Homepage = "https://tessgit.mit.edu/tica/tica"
@@ -65,12 +71,6 @@ Documentation = "https://archive.stsci.edu/hlsp/tica"
 package-dir = {"" = "src"}
 packages = ["tica", "tica.cli", "btjd", "wcs_build"]
 script-files = [
-    "bin/tica-calibrate-spoc",
-    "bin/tica-calibrate-tso",
-    "bin/tica-wcs-step1-allcam-allccd",
-    "bin/tica-wcs-step2-allcam-allccd",
-    "bin/tica-wcs-spoc",
-    "bin/tica-stage-delivery",
     "bin/tica-doall-automate",
 ]
 
