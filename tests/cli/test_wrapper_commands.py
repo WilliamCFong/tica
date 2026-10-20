@@ -188,20 +188,42 @@ def test_wcs_step2_allccd_exit_1_on_failure(tmp_path, monkeypatch):
     assert len(rec.calls) == 16
 
 
-def test_wcs_spoc_runs_each_ccd(tmp_path, monkeypatch, recorder):
-    (tmp_path / "ref_stars").mkdir()
+def make_spoc(d):
+    (d / "ref_stars").mkdir(parents=True)
     for cam in range(1, 5):
         for ccd in range(1, 5):
-            (tmp_path / "tess2021041025908-s0035-{}-{}-0205-s_ffir.cal.fits.gz".format(cam, ccd)).touch()
-            (tmp_path / "ref_stars" / "hlsp_tica_tess_ffi_s0035-cam{}-ccd{}_tess_v02_cat.h5".format(cam, ccd)).touch()
-    monkeypatch.chdir(tmp_path)
+            (d / "tess2021041025908-s0035-{}-{}-0205-s_ffir.cal.fits.gz".format(cam, ccd)).touch()
+            (d / "tess2021041025908-s0035-{}-{}-0205-s_ffir.fits.gz".format(cam, ccd)).touch()   # raw input
+            for v in ("v01", "v02"):
+                (d / "ref_stars" / "hlsp_tica_tess_ffi_s0035-cam{}-ccd{}_tess_{}_cat.h5".format(cam, ccd, v)).touch()
+            (d / "ref_stars" / "hlsp_tica_tess_ffi_s0135-cam{}-ccd{}_tess_v01_cat.h5".format(cam, ccd)).touch()
 
-    assert wcs_spoc.main(["--sector", "35", "--dstem", "."]) == 0
+
+@pytest.mark.parametrize("dstem", [".", "spoc", "ABS"])
+def test_wcs_spoc_runs_each_ccd(tmp_path, monkeypatch, recorder, dstem):
+    make_spoc(tmp_path / "spoc")
+    monkeypatch.chdir(tmp_path / "spoc" if dstem == "." else tmp_path)
+    dstem = str(tmp_path / "spoc") if dstem == "ABS" else dstem
+
+    assert wcs_spoc.main(["--sector", "35", "--dstem", dstem]) == 0
 
     assert len(recorder.calls) == 16
     args = recorder.calls[0][1]
-    assert args[args.index("-if") + 1] == "./tess2021041025908-s0035-1-1-0205-s_ffir.cal.fits.gz"
-    assert args[args.index("-rd") + 1].endswith("ref_stars/hlsp_tica_tess_ffi_s0035-cam1-ccd1_tess_v02_cat.h5")
+    assert args[args.index("-if") + 1:args.index("-fd")] == [
+        dstem + "/tess2021041025908-s0035-1-1-0205-s_ffir.cal.fits.gz"]
+    assert args[args.index("-rd") + 1] == dstem + "/ref_stars/hlsp_tica_tess_ffi_s0035-cam1-ccd1_tess_v02_cat.h5"
+
+
+def test_wcs_spoc_reports_failures(tmp_path, monkeypatch):
+    make_spoc(tmp_path)
+    os.remove(tmp_path / "ref_stars" / "hlsp_tica_tess_ffi_s0035-cam4-ccd4_tess_v01_cat.h5")
+    os.remove(tmp_path / "ref_stars" / "hlsp_tica_tess_ffi_s0035-cam4-ccd4_tess_v02_cat.h5")
+    rec = Recorder(fail=lambda module, args, cwd: args[3] == "2" and args[5] == "1")
+    monkeypatch.setattr(_common, "run_command", rec.run_command)
+    monkeypatch.chdir(tmp_path)
+
+    assert wcs_spoc.main(["--sector", "35", "--dstem", "."]) == 1
+    assert len(rec.calls) == 15
 
 
 def test_stage_delivery_names(tmp_path, monkeypatch):
