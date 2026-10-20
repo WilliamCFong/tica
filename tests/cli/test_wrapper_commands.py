@@ -223,3 +223,29 @@ def test_stage_delivery_names(tmp_path, monkeypatch):
 @pytest.mark.parametrize("segment, orbit", [("o1a", "o1"), ("o2b", "o2"), ("o3", "o3"), ("x", "")])
 def test_stage_delivery_orbit_label(segment, orbit):
     assert stage_delivery.orbit_label(segment) == orbit
+
+
+def test_calibrate_tso_includes_haho_files_without_orbseg(tmp_path, monkeypatch, recorder):
+    make_poc(tmp_path)
+    haho = tmp_path / "poc" / "orbit-205" / "ffi_fits-haho"
+    haho.mkdir()
+    (haho / "tess2025000000000-00205999-1-crm-ffi.fits").touch()
+    monkeypatch.chdir(tmp_path)
+
+    assert calibrate_tso.main(["--o1", "205", "--o2", "None", "--dstem", "poc", "--caldir", "cal_200sec"]) == 0
+
+    inlist = (tmp_path / "cam1_ccd1" / "inlist").read_text().split()
+    assert os.path.basename(inlist[0]) == "tess2025000000000-00205999-1-crm-ffi.fits"
+    assert len(inlist) == 5
+
+
+def test_calibrate_tso_segment_with_tess_in_path(tmp_path, monkeypatch, recorder):
+    site = tmp_path / "data" / "tess"
+    site.mkdir(parents=True)
+    make_poc(site)
+    monkeypatch.chdir(site)
+
+    assert calibrate_tso.main(["--o1", "205", "--o2", "None", "--orbseg", "o1b", "--dstem", str(site / "poc"),
+                               "--caldir", "cal_200sec"]) == 0
+    inlist = (site / "cam1_ccd1" / "inlist").read_text().split()
+    assert len(inlist) == 2 and all("tess2025002000000" in f for f in inlist)

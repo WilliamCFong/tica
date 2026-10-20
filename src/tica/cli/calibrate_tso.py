@@ -66,15 +66,15 @@ def check_config(o1, o2, orbseg):
 
 
 def segment_stamps(files):
-    """The distinct date stamps (tess<stamp>-...) in the file paths, sorted."""
-    return sorted({f.split('tess')[1].split('-')[0] if 'tess' in f else '' for f in files})
+    """The distinct date stamps (tess<stamp>-...) in the file names, sorted."""
+    return sorted({os.path.basename(f)[len('tess'):].split('-')[0] for f in files})
 
 
 def orbit_files(dstem, orbit, cam, orbseg, slash='//'):
     """Raw FFIs of one camera in one orbit, or None if orbseg names a missing segment."""
     files = []
     if orbseg == '':
-        if os.path.isdir('{}//orbit-{{{}}}/ffi_fits-haho'.format(dstem, orbit)):
+        if os.path.isdir('{}//orbit-{}/ffi_fits-haho'.format(dstem, orbit)):
             files += _common.sorted_glob('{}//orbit-{}/ffi_fits-haho/tess*-{}-crm-ffi.fits*'.format(dstem, orbit, cam))
         files += _common.sorted_glob('{}{}orbit-{}/ffi_fits/tess*-{}-crm-ffi.fits*'.format(dstem, slash, orbit, cam))
         return files
