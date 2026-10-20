@@ -19,8 +19,16 @@ cam<i>_ccd<j>/ and logs in tica_logs/. Run later steps (tica-darktime,
 tica-wcs-step1-allcam-allccd, tica-wcs-step2-allcam-allccd) from inside that
 directory.
 
+Other modes, used by tica-doall-automate to write each FFI only once:
+  --no_write   record cal_timeseries.txt and the log, but write no FFIs
+  --fin FIN    write only the FFIs with this FIN (the WCS reference frame),
+               without diagnostics, logging to <segment>_tica_reference.log
+  --hlspdir    run tica-cal-ffi2hlsp instead of tica-cal-ffi2ccds: calibrate,
+               fit the WCS, and write the delivery files to <hlspdir>; needs
+               --orbseg, --sector and <outdir>/refout from tica-wcs-step1
+
 Exit codes: 0 success; 1 some files failed to calibrate (the others were
-written); 2 configuration error."""
+written); 2 configuration error, here or in a camera's run."""
 
 
 def build_parser():
@@ -43,7 +51,28 @@ def build_parser():
     parser.add_argument("--outdir", default='', metavar="DIRECTORY",
                         help="directory for the outputs, created if needed "
                         "(default: current directory)")
+    parser.add_argument("--no_write", action="store_true",
+                        help="calibrate and record diagnostics only; write no FFIs")
+    parser.add_argument("--fin", metavar="FIN",
+                        help="calibrate only the FFIs with this FIN, without diagnostics")
+    parser.add_argument("--hlspdir", metavar="DIRECTORY",
+                        help="write delivery files here with tica-cal-ffi2hlsp, "
+                        "e.g. <delivery root>/s0098")
+    parser.add_argument("--sector", type=int, help="sector number, for --hlspdir")
+    parser.add_argument("--hlsp_version", default='v01',
+                        help="delivery version, for --hlspdir (default: %(default)s)")
+    parser.add_argument("--no_diagnostics", action="store_true",
+                        help="do not write cal_timeseries.txt, e.g. after a --no_write run")
     return parser
+
+
+def check_mode(args):
+    """Return an error message for inconsistent output modes, or None."""
+    if sum([args.no_write, args.fin is not None, args.hlspdir is not None]) > 1:
+        return "Configuration Error. Use only one of --no_write, --fin and --hlspdir."
+    if args.hlspdir is not None and (args.orbseg == '' or args.sector is None):
+        return "Configuration Error. --hlspdir needs --orbseg and --sector."
+    return None
 
 
 def check_config(o1, o2, orbseg):
@@ -106,7 +135,7 @@ def main(argv=None):
     if orbseg == '':
         print("orbseg is not set, running both ffi_fits-haho and ffi_fits and will not write "
               "keyword ORB_SEG in output files.")
-    message = check_config(o1, o2, orbseg)
+    message = check_mode(args) or check_config(o1, o2, orbseg)
     if message:
         print(message)
         return 2
@@ -146,10 +175,30 @@ def main(argv=None):
                       "{}/orbit-{}/ffi_fits.".format(orbseg, dstem, orbit))
                 return 2
             files += found
+        if args.fin is not None:
+            files = [f for f in files if os.path.basename(f).split('-')[1] == args.fin]
+            if not files:
+                print("Error.  No camera {} FFI has FIN {}.".format(i, args.fin))
+                return 2
         with open(os.path.join(outdir, 'cam{}_ccd1'.format(i), 'inlist'), 'w') as fout:
             fout.writelines(f + '\n' for f in files)
 
     logfile = log_name(o1, o2, orbseg)
+    if args.fin is not None:
+        logfile = logfile.replace('_tica.log', '_tica_reference.log')
+
+    if args.hlspdir is not None:
+        module = 'cal_ffi2hlsp'
+        options = ['--hlspdir', os.path.abspath(args.hlspdir), '--sector', args.sector,
+                   '--refdir', os.path.join(outdir, 'refout'), '--workdir', outdir,
+                   '--hlsp_version', args.hlsp_version]
+    else:
+        module = 'cal_ffi2ccds'
+        options = ['--no_gzip']
+        if args.no_write:
+            options.append('--no_write')
+    if args.no_diagnostics or args.fin is not None:
+        options.append('--no_diagnostics')
 
     #run tica
     #set a flag if there are errors.
@@ -157,12 +206,15 @@ def main(argv=None):
     errorflag = 0
     for i in range(1, 5):
         camdir = os.path.join(outdir, 'cam{}_ccd1'.format(i))
-        rc = _common.run_command('cal_ffi2ccds',
+        rc = _common.run_command(module,
                                  ['inlist', '--outdir', '.', '--caldir', caldir,
                                   '--parallel', args.ncores, '--log', logfile,
-                                  '--orb_seg', orbseg, '--no_gzip'],
+                                  '--orb_seg', orbseg] + options,
                                  cwd=camdir)
-        if rc != 0:
+        if rc == 2:
+            # a configuration error, e.g. missing reference star lists
+            errorflag = 2
+        elif rc != 0 and errorflag == 0:
             errorflag = 1
         for j in (2, 3, 4):
             for f in _common.sorted_glob(os.path.join(camdir, 'tess*ccd{}.cal.fits*'.format(j))):

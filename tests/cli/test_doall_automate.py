@@ -103,8 +103,15 @@ class FakeSteps:
                 for j in range(1, 5):
                     d = cwd / "cam{}_ccd{}".format(i, j)
                     d.mkdir(parents=True, exist_ok=True)
-                    (d / "tess2025001000000-00100724-{}-crm-ffi_ccd{}.cal.fits".format(i, j)).touch()
-                (cwd / "cam{}_ccd1".format(i) / "cal_timeseries.txt").touch()
+                    if "--fin" in args:
+                        (d / "tess2025001000000-00100724-{}-crm-ffi_ccd{}.cal.fits".format(i, j)).touch()
+                    if "--hlspdir" in args:
+                        out = Path(args[args.index("--hlspdir") + 1]) / "cam{}-ccd{}".format(i, j)
+                        out.mkdir(parents=True, exist_ok=True)
+                        (out / "hlsp_tica_tess_ffi_s0098-o1-00100724-cam{}-ccd{}_tess_v01_img.fits".format(i, j)).touch()
+                        (d / "wcs_diags2").mkdir(exist_ok=True)
+                if "--fin" not in args and "--no_diagnostics" not in args:
+                    (cwd / "cam{}_ccd1".format(i) / "cal_timeseries.txt").touch()
         elif module == "darktime":
             orbit = args[args.index("--orbit") + 1]
             for i in range(1, 5):
@@ -114,10 +121,6 @@ class FakeSteps:
             (cwd / "cam2_ccd3" / "bad_calibration.txt").touch()
             if "--save_reffin" in args:
                 (cwd / "reffin.txt").write_text("cam1_ccd1 00100724\ncam1_ccd2 00100725\n")
-        elif module == "wcs_step2_allccd":
-            for i in range(1, 5):
-                for j in range(1, 5):
-                    (cwd / "cam{}_ccd{}".format(i, j) / "wcs_diags2").mkdir()
         return self.rcs.get(module, 0)
 
 
@@ -136,21 +139,28 @@ def test_doall_o1a_success(tmp_path, run_doall):
     rc, calls, mails = run_doall(make_site(tmp_path))
 
     assert rc == 0
-    assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime", "wcs_step1_allccd",
-                                     "wcs_step2_allccd", "stage_delivery", "check_delivery",
-                                     "production_table"]
+    assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime", "calibrate_tso",
+                                     "wcs_step1_allccd", "calibrate_tso", "stage_delivery",
+                                     "check_delivery", "production_table"]
+    delivery = str(tmp_path / "delivery") + "/s0098"
+    tso = [a for m, a in calls if m == "calibrate_tso"]
+    assert all(a[:6] == ["--o1", "205", "--o2", "None", "--orbseg", "o1a"] for a in tso)
+    assert tso[0][-1:] == ["--no_write"]
+    assert tso[1][-2:] == ["--fin", "00100724"]
+    assert tso[2][-5:] == ["--hlspdir", delivery, "--sector", "98", "--no_diagnostics"]
     args = dict(calls)
-    assert args["calibrate_tso"][:6] == ["--o1", "205", "--o2", "None", "--orbseg", "o1a"]
     assert args["wcs_step1_allccd"] == ["--sector", "98", "--dstem", "./", "--reffin", "00100724"]
-    assert args["stage_delivery"] == ["v01", str(tmp_path / "delivery") + "/s0098", "o1a", "98"]
+    assert args["stage_delivery"] == ["v01", delivery, "o1a", "98", "--ref-stars-only"]
     assert args["production_table"] == ["--segments", "o1a", "--wcs1",
                                         "--output", str(tmp_path / "production_table.md")]
     assert [m[1] for m in mails] == ["start@x", "ok@x,ok2@x"]
     assert (tmp_path / "records.txt").read_text() == "98 205 o1a 3 3 3 3 tess2025001000000 finished\n"
     seg = tmp_path / "work" / "sector98" / "cam2_ccd1" / "o1a"
     assert sorted(p.name for p in seg.iterdir()) == [
-        "cal_timeseries.txt", "cal_timeseries_o1a.png", "rms_list",
-        "tess2025001000000-00100724-2-crm-ffi_ccd1.cal.fits", "wcs_diags2"]
+        "cal_timeseries.txt", "cal_timeseries_o1a.png", "rms_list", "wcs_diags2"]
+    # the reference frames for tica-wcs-step1 are not kept
+    assert list((tmp_path / "work").rglob("tess*fits")) == []
+    assert (tmp_path / "delivery" / "s0098" / "cam2-ccd1").is_dir()
     assert (tmp_path / "work" / "sector98" / "cam2_ccd3" / "o1a" / "bad_calibration.txt").exists()
     assert (tmp_path / "repo" / "records.txt").read_text() == (tmp_path / "records.txt").read_text()
 
@@ -163,10 +173,13 @@ def test_doall_skips_recorded_segment(tmp_path, run_doall):
 
 
 def test_doall_o1b_error_records_and_mails(tmp_path, run_doall):
-    rc, calls, mails = run_doall(make_site(tmp_path, stems=2), rcs={"wcs_step2_allccd": 1})
+    rc, calls, mails = run_doall(make_site(tmp_path, stems=2), rcs={"calibrate_tso": 1})
 
     assert rc == 0
-    assert "wcs_step1_allccd" not in [m for m, _ in calls]
+    assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime", "stage_delivery",
+                                     "check_delivery"]
+    assert dict(calls)["calibrate_tso"][-4:] == ["--hlspdir", str(tmp_path / "delivery") + "/s0098",
+                                                 "--sector", "98"]
     assert "production_table" not in [m for m, _ in calls]
     assert mails[-1][1] == "err@x"
     assert "there were errors" in mails[-1][2]
@@ -196,4 +209,4 @@ def test_doall_overrides_and_environment(tmp_path, run_doall, monkeypatch):
     assert rc == 0
     tso = dict(calls)["calibrate_tso"]
     assert tso[:6] == ["--o1", "None", "--o2", "206", "--orbseg", "o2a"]
-    assert tso[-2:] == ["--ncores", "12"]
+    assert tso[tso.index("--ncores") + 1] == "12"

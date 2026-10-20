@@ -811,6 +811,22 @@ def fit_wcs(ras, decs, cols, rows, tmags, \
 
 
 def worker( intuple):
+    """Fit the WCS of the image file intuple[0] and rewrite it in place."""
+    curImg = intuple[0]
+    hdulistCal = fits.open(curImg)
+    all_hdus, result = fit_hdulist(hdulistCal, intuple)
+    if all_hdus is not None:
+        all_hdus.writeto(curImg, checksum=True, overwrite=True)
+    return result
+
+
+def fit_hdulist(hdulistCal, intuple):
+    """Fit the WCS of an open image, named intuple[0] in the logs.
+
+    Returns (all_hdus, diagnostics): all_hdus is the image with the WCS
+    keywords and the WCS_Stars table, ready to write, or None if the image
+    already has a WCS.
+    """
     #unpack intuple
     curImg           = intuple[0]
     obscols          = intuple[1]  
@@ -839,7 +855,6 @@ def worker( intuple):
     outputDir        = intuple[24]
  
     #do the calcs
-    hdulistCal = fits.open(curImg)
     gotTimeStamp = False
     if not gotTimeStamp:
         try:
@@ -879,10 +894,10 @@ def worker( intuple):
         exStd3 = hdulistCal[0].header['RMSX3']
         gdFracs = hdulistCal[0].header['WCSGDF']
  
-        return [allStd, brightStd,faintStd,
-                allStdPix, brightStdPix, faintStdPix,
-                hdulistCal[dataKey].header[timeKey], 
-                exStd0, exStd1, exStd2, exStd3,gdFracs]
+        return None, [allStd, brightStd,faintStd,
+                      allStdPix, brightStdPix, faintStdPix,
+                      hdulistCal[dataKey].header[timeKey],
+                      exStd0, exStd1, exStd2, exStd3,gdFracs]
  
  
     #imgNames = np.append(imgNames, os.path.basename(curImg))
@@ -1209,10 +1224,6 @@ def worker( intuple):
 
     # Now merge the hdus
     all_hdus = fits.HDUList([hdulistCal[0], hduex])
-    # Actually write fits file
-    #fileBase = os.path.splitext(os.path.basename(curImg))[0]
-    #outFits = os.path.join(outputDir, fileBase+'_wcs.fits')        
-    all_hdus.writeto(curImg, checksum=True, overwrite=True)
 
     # Show where the prfs were deemed not good
     if DEBUG_LEVEL>2:
@@ -1225,20 +1236,27 @@ def worker( intuple):
         plt.plot(newCols[idx], newRows[idx], '.r')
         plt.show()
     # save diagnostic fit quality for image
-    return [allStd, brightStd, faintStd,
-            allStdPix, brightStdPix, faintStdPix,
-            hdulistCal[dataKey].header[timeKey], 
-            exResids[0], exResids[1],exResids[2],exResids[3],
-            gdFracs ]
+    return all_hdus, [allStd, brightStd, faintStd,
+                      allStdPix, brightStdPix, faintStdPix,
+                      hdulistCal[dataKey].header[timeKey],
+                      exResids[0], exResids[1],exResids[2],exResids[3],
+                      gdFracs ]
 
 
 
-def fit_wcs_in_imgdir(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA, 
-                      IMG_LIST_STR, outputDir, fitDegree=5, 
-                      fixApertures = True,
-                      saveDiag=False,
-                      DEBUG_LEVEL=0,
-                      n_cores=1):
+# Write out fit residual figures for every FIGOUTEVERY image
+FIGOUTEVERY = 500
+
+
+def wcs_fit_params(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA,
+                   outputDir, fitDegree=5,
+                   fixApertures = True,
+                   DEBUG_LEVEL=0):
+    """Load the step 1 reference stars for one CCD.
+
+    Returns the worker settings shared by every image of the CCD;
+    worker_args adds the image.
+    """
     
     # We want control point grid over pixels to get an even
     # distribution of stars for determining wcs
@@ -1250,8 +1268,6 @@ def fit_wcs_in_imgdir(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA,
     blkHlfCent = 2 # The analysis region for background estimate, gdPRF check, initial
                     # position offets use blkHlf. However, final centroid is calcualted
                     # with a small blkHlfCent region
-    FIGOUTEVERY = 500 # Write out fit residual figures for every
-                        # FIGOUTEVERY image
     
     # Load the reference position information
     if fixApertures:
@@ -1321,102 +1337,68 @@ def fit_wcs_in_imgdir(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA,
     rowCtrl2D_flat = rowCtrl2D.flatten()
     nCtrl = len(colCtrl2D_flat)
 
+    return (obscols, obsrows,
+            colCtrl2D_flat,
+            blkidxs,
+            fixApertures,
+            midcols, midrows,
+            blkHlf, blkHlfCent,
+            fitDegree,
+            ras, decs, tics, tmags,
+            SECTOR_WANT,
+            CAMERA_WANT, CCD_WANT,
+            CTRL_PER_COL, CTRL_PER_ROW,
+            DEBUG_LEVEL,
+            wingFAC, contrastFAC,
+            outputDir)
+
+
+def worker_args(curImg, ii, params):
+    """The worker intuple for image number ii of a CCD, from wcs_fit_params."""
+    PLOT_FIG = ii % FIGOUTEVERY == 0
+    return (curImg,) + params[:20] + (PLOT_FIG,) + params[20:]
+
+
+def fit_wcs_in_imgdir(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA, 
+                      IMG_LIST_STR, outputDir, fitDegree=5, 
+                      fixApertures = True,
+                      saveDiag=False,
+                      DEBUG_LEVEL=0,
+                      n_cores=1):
+    params = wcs_fit_params(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA,
+                            outputDir, fitDegree, fixApertures, DEBUG_LEVEL)
+
     # Make list of images in work dir for this camera and ccd
     inputImgList = IMG_LIST_STR#glob.glob(IMG_LIST_STR)
     # sort images
     inputImgList.sort()
-#    print(inputImgList)
-
-    # Always initialize to the reference image coordinates
-    lstGdCols = np.copy(obscols)
-    lstGdRows = np.copy(obsrows)
-    
-    # ***TESTTESTTEST
-    # If you want to test on a subsample 
-    #  of the image list use this line
-    #inputImgList = inputImgList[0::20]
-    #inputImgList = inputImgList[-13:-10]
-    #inputImgList = inputImgList[3532:3538]
-    # BE SURE TO COMMENT OUT IN PRODUCTION
-
-    # The following arrays will keep the 
-    #  the diagnostic information about quality of wcs fit    
-    nImg = len(inputImgList)
-    imgNames = np.array([], dtype=str)
-
-    #allStds = np.zeros((nImg,), dtype=np.float64)
-    #brightStds = np.zeros_like(allStds)
-    #faintStds = np.zeros_like(allStds)
-    #gdFracs = np.zeros_like(allStds)
-    #allPixStds = np.zeros_like(allStds)
-    #brightPixStds = np.zeros_like(allStds)
-    #faintPixStds = np.zeros_like(allStds)
-    #ts = np.zeros_like(allStds)
-    #exStd0s = np.zeros_like(allStds)
-    #exStd1s = np.zeros_like(allStds)
-    #exStd2s = np.zeros_like(allStds)
-    #exStd3s = np.zeros_like(allStds)
-    
-
 
     results_async = []
     result = []
     if n_cores > 1:
         p = Pool(n_cores)
-        collect_results = lambda x: result.append(x)
-
         for ii,Img in enumerate(inputImgList):
-            if np.mod(ii, FIGOUTEVERY) == 0:
-                PLOT_FIG = True
-            else:
-                PLOT_FIG = False
-            results_async.append( p.apply_async( worker, ((Img, 
-                                                          obscols,obsrows,
-                                                          colCtrl2D_flat,
-                                                          blkidxs,
-                                                          fixApertures,
-                                                          midcols,midrows,
-                                                          blkHlf, blkHlfCent,
-                                                          fitDegree,
-                                                          ras,decs,tics,tmags,
-                                                          SECTOR_WANT,
-                                                          CAMERA_WANT, CCD_WANT, 
-                                                          CTRL_PER_COL,CTRL_PER_ROW,
-                                                          DEBUG_LEVEL, PLOT_FIG,
-                                                          wingFAC, contrastFAC,
-                                                          outputDir), ))
-                              )
-                       
+            results_async.append( p.apply_async( worker, (worker_args(Img, ii, params), )) )
+
         p.close()
         p.join()
 
         for res in results_async:
             result.append( res.get())
-            #with Pool(n_cores) as p:
-            #    result = p.map( worker, inputImgList,)
 
     else:
         for ii,Img in enumerate(inputImgList):
-            if np.mod(ii, FIGOUTEVERY) == 0:
-                PLOT_FIG = True
-            else:
-                PLOT_FIG = False
-            result.append(worker( (Img,
-                                   obscols,obsrows,
-                                   colCtrl2D_flat,
-                                   blkidxs,
-                                   fixApertures,
-                                   midcols,midrows,
-                                   blkHlf, blkHlfCent,
-                                   fitDegree,
-                                   ras,decs,tics,tmags,
-                                   SECTOR_WANT,
-                                   CAMERA_WANT, CCD_WANT, 
-                                   CTRL_PER_COL,CTRL_PER_ROW,
-                                   DEBUG_LEVEL, PLOT_FIG,
-                                   wingFAC, contrastFAC,
-                                   outputDir))
-                      )
+            result.append(worker(worker_args(Img, ii, params)))
+
+    save_wcs_diagnostics(result, SECTOR_WANT, CAMERA_WANT, CCD_WANT,
+                         outputDir, saveDiag, DEBUG_LEVEL)
+
+
+def save_wcs_diagnostics(result, SECTOR_WANT, CAMERA_WANT, CCD_WANT,
+                         outputDir, saveDiag=False, DEBUG_LEVEL=0):
+    """Write wcs_diags2/ from the per-image worker results of one CCD."""
+    # never filled in; kept for the imgNames dataset
+    imgNames = np.array([], dtype=str)
 
     result = np.array(result)
     # save diagnostic fit quality for image

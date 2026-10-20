@@ -5,10 +5,20 @@ from time import time
 
 from tica.cli._common import setup_run_logging
 from wcs_build.step1_get_refimg_ctrlpts import get_refimg_ctrlpts
+from wcs_build.tic_catalog import PROVIDERS, TICError, get_provider
+from wcs_build.tic_postgres import default_service
 
 DESCRIPTION = """\
 Step 1 of the WCS fit: find bright, isolated stars on a reference image and
-save their positions as control points for step 2 (tica-wcs-step2)."""
+save their positions as control points for step 2 (tica-wcs-step2).
+
+Stars come from the TESS Input Catalog, by default from a PostgreSQL copy
+reached through a libpq service (see wcs_build.tic_postgres); --catalog mast
+uses the MAST API instead. TIC positions are propagated to the reference
+image's mid-exposure time, which is recorded in the output as pm_epoch_jd.
+
+Exit codes: 0 success; 1 failure, e.g. too few stars; 2 the TIC could not be
+reached or queried."""
 
 
 def build_parser():
@@ -36,6 +46,11 @@ def build_parser():
                         "tend to have a smaller ratio.")
     parser.add_argument("-l", "--log", metavar="LOG_FILE",
                         help="save logging output to thiss file")
+    parser.add_argument("--catalog", choices=PROVIDERS, default='postgres',
+                        help="where to get the TIC from (default: %(default)s)")
+    parser.add_argument("--tic-service", default=default_service(),
+                        help="libpq service for --catalog postgres [TICA_TIC_SERVICE] "
+                        "(default: %(default)s)")
     return parser
 
 
@@ -50,10 +65,18 @@ def main(argv=None):
     #  bright isolated stars on a reference image
     #  that will be used on all images for a sector camera ccd
     #  to determine a wcs solution
-    get_refimg_ctrlpts(args.sector, args.camera, args.ccd,
-                       args.refimage,
-                       args.outputfile, args.debug,
-                       args.wing, args.contrast)
+    options = {'service': args.tic_service} if args.catalog == 'postgres' else {}
+    try:
+        with get_provider(args.catalog, **options) as catalog:
+            get_refimg_ctrlpts(args.sector, args.camera, args.ccd,
+                               args.refimage,
+                               args.outputfile, args.debug,
+                               args.wing, args.contrast,
+                               catalog=catalog)
+    except TICError as e:
+        logging.error(str(e))
+        print("Configuration Error. {}".format(e), file=sys.stderr)
+        return 2
     runtime = time() - starttime
     logging.info("Runtime: {0:.2f}sec".format(runtime))
     return 0

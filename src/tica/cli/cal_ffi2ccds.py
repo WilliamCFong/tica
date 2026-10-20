@@ -57,29 +57,36 @@ TIMESERIES_COLUMNS = ('name',
                       'outputA_ccd4', 'outputB_ccd4', 'outputC_ccd4', 'outputD_ccd4')
 
 
+def ffi_diagnostics(im):
+    """Background modes and 1D bias corrections of a calibrated FFI_File."""
+    #mode of the image, to track scattered light
+    modes = []
+    #1D bias corrections, by CCD output channel,
+    #to track saturation/bad calibration
+    bias_corrections = []
+    for ccd in im.calibrated_CCDs:
+        modes.append(ccd.get_image_mode(10**(np.r_[2.7:7.7:4000j])))
+        bias_corrections = np.r_[bias_corrections, ccd.overclock_corrections]
+    return np.r_[modes, bias_corrections]
+
+
 def worker(in_tuple):
-    filename, outdir, trim, orbit_segment, no_gzip, no_diagnostics = in_tuple
+    filename, outdir, trim, orbit_segment, no_gzip, no_diagnostics, no_write = in_tuple
 
     im = FFI_File(filename,
                   calibration=get_calibration(),
                   outdir=outdir,
                   orbit_segment=orbit_segment)
 
-    if trim:
+    if no_write:
+        pass
+    elif trim:
         im.write_calibrated_trimmed_CCDs(no_gzip=no_gzip)
     else:
         im.write_calibrated_CCDs(no_gzip=no_gzip)
 
     if not no_diagnostics:
-        #mode of the image, to track scattered light
-        modes = []
-        #1D bias corrections, by CCD output channel,
-        #to track saturation/bad calibration
-        bias_corrections = []
-        for ccd in im.calibrated_CCDs:
-            modes.append(ccd.get_image_mode(10**(np.r_[2.7:7.7:4000j])))
-            bias_corrections = np.r_[bias_corrections, ccd.overclock_corrections]
-        return (filename, np.r_[modes, bias_corrections])
+        return (filename, ffi_diagnostics(im))
 
 
 def write_timeseries(outdir, results):
@@ -110,6 +117,9 @@ def build_parser():
     parser.add_argument("--no_diagnostics", action="store_true",
                         help="if set, do not write txt file with "
                         "1D bias corrections or background estimates.")
+    parser.add_argument("--no_write", action="store_true",
+                        help="if set, calibrate without writing any FITS files, e.g. to "
+                        "record only the diagnostics.")
     return parser
 
 
@@ -125,7 +135,8 @@ def main(argv=None):
     calibration = load_calibration(args.caldir)
 
     starttime = time()
-    items = [(filename, args.outdir, args.trim, args.orb_seg, args.no_gzip, args.no_diagnostics)
+    items = [(filename, args.outdir, args.trim, args.orb_seg, args.no_gzip, args.no_diagnostics,
+              args.no_write)
              for filename in inlist]
     results = map_files(worker, items, processes=args.parallel, calibration=calibration)
 

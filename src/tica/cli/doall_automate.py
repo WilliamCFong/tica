@@ -13,13 +13,25 @@ Process the newest POC orbit segment end to end; meant to run from cron.
 Finds the most recently modified orbit-<N> directory under --dstem, works out
 the orbit segment (o1a, o1b, o2a, ...), and skips it if --records already
 lists it with the same file counts. Otherwise it refreshes the ephemeris and
-runs, in <workdir>/sector<S>: tica-calibrate-tso, tica-darktime,
-tica-wcs-step1-allcam-allccd (o1a only), tica-wcs-step2-allcam-allccd,
-tica-stage-delivery and tica-check-delivery, then appends to --records,
-updates the production table, and emails the result.
+runs, in <workdir>/sector<S>, then appends to --records, updates the
+production table, and emails the result.
+
+Each calibrated CCD image is written once, straight to the delivery
+directory <outputdir>/s<S>, by tica-calibrate-tso --hlspdir (calibration and
+WCS fit in memory). No FFIs are kept in <workdir>. For o1a, which needs a new
+WCS reference frame, the steps are:
+  tica-calibrate-tso --no_write    backgrounds for tica-darktime, no FFIs
+  tica-darktime --save_reffin      pick the reference frame
+  tica-calibrate-tso --fin         write the 16 reference CCD images
+  tica-wcs-step1-allcam-allccd     reference star lists in refout/
+  tica-calibrate-tso --hlspdir     calibrate, fit and deliver every FFI
+For later segments, tica-calibrate-tso --hlspdir runs first, then
+tica-darktime. Both finish with tica-stage-delivery --ref-stars-only and
+tica-check-delivery.
 
 Each path, core count and recipient list can also be set with the
-environment variable shown in its help. The defaults are the MIT production
+environment variable shown in its help. tica-wcs-step1 reads the TIC through
+the libpq service named by TICA_TIC_SERVICE (default: tic). The defaults are the MIT production
 settings.
 
 Exit codes: 0 done or nothing to do; 1 off-nominal downlink, not processed;
@@ -56,9 +68,11 @@ def build_parser():
     parser.add_argument("--caldir", default=_env("TICA_CALDIR", "/pdo/users/faus/python/tica/calibration_200sec"),
                         help="calibration models [TICA_CALDIR] (default: %(default)s)")
     parser.add_argument("--ncores", type=int, default=int(_env("TICA_NCORES", "57")),
-                        help="cores for tica-calibrate-tso [TICA_NCORES] (default: %(default)s)")
+                        help="cores for tica-calibrate-tso, which also fits the WCS "
+                        "[TICA_NCORES] (default: %(default)s)")
     parser.add_argument("--ncores-wcs", type=int, default=int(_env("TICA_NCORES_WCS", "10")),
-                        help="cores per CCD for WCS step 2 [TICA_NCORES_WCS] (default: %(default)s)")
+                        help="unused: the WCS fit now runs in the tica-calibrate-tso pool; "
+                        "kept so existing settings still parse [TICA_NCORES_WCS]")
     parser.add_argument("--dstem", default=_env("TICA_POC_ORBITS", "/pdo/poc-data/orbits/"),
                         help="POC orbit directories [TICA_POC_ORBITS] (default: %(default)s)")
     parser.add_argument("--outputdir", default=_env("TICA_DELIVERY_DIR", "/pdo/qlp-data/tica-delivery/"),
@@ -192,6 +206,15 @@ def move_into(names, destdir):
             print("mv: cannot move {} to {}: {}".format(name, dest, e.strerror))
 
 
+def remove_reference_frames(workdir):
+    """Delete the calibrated reference frames written for tica-wcs-step1.
+
+    They have no WCS, so they must not reach the delivery directory.
+    """
+    for name in glob.glob(os.path.join(workdir, 'cam*_ccd*', 'tess*fits')):
+        os.remove(name)
+
+
 def tidy_segment(workdir, segment):
     """Move this segment's products into cam<i>_ccd<j>/<segment>/."""
     for i in range(1, 5):
@@ -202,10 +225,8 @@ def tidy_segment(workdir, segment):
             print(ccddir)
             segdir = os.path.join(ccddir, segment)
             os.makedirs(segdir, exist_ok=True)
-            names = sorted(glob.glob(os.path.join(ccddir, 'tess*fits')))
-            if not names:
-                print("mv: cannot stat '{}': No such file or directory".format(os.path.join(ccddir, 'tess*fits')))
-            move_into(names, segdir)
+            # FFIs, if any were written here by hand-run steps
+            move_into(sorted(glob.glob(os.path.join(ccddir, 'tess*fits'))), segdir)
             products = ['wcs_diags2', 'rms_list']
             # tica-darktime writes bad_calibration.txt only for CCDs that have bad cadences
             if os.path.exists(os.path.join(ccddir, 'bad_calibration.txt')):
@@ -283,34 +304,50 @@ def run(args, mailer):
     print(workdir)
 
     errorflag = 0
-    print("Running tica-calibrate-tso...")
     o1, o2 = (orbit, "None") if mod == 1 else ("None", orbit)
-    rc = _common.run_command('calibrate_tso', ['--o1', o1, '--o2', o2, '--orbseg', segment,
-                                               '--dstem', dstem, '--caldir', args.caldir,
-                                               '--ncores', args.ncores], cwd=workdir)
-    errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
+    calibrate = ['--o1', o1, '--o2', o2, '--orbseg', segment,
+                 '--dstem', dstem, '--caldir', args.caldir, '--ncores', args.ncores]
+    deliver = ['--hlspdir', delivery, '--sector', SECTOR]
 
-    print("Running tica-darktime...")
     if 'o1a' in segment:
+        #the WCS reference frame is picked from the whole segment's backgrounds,
+        #so record those first without writing any FFIs
+        print("Running tica-calibrate-tso --no_write...")
+        rc = _common.run_command('calibrate_tso', calibrate + ['--no_write'], cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
+
+        print("Running tica-darktime...")
         _common.run_command('darktime', ['--save_reflist', '--save_reffin', '--use_first_ccd',
                                          '--orbit', segment], cwd=workdir)
         reffin = read_reffin(workdir)
+
+        print("Running tica-calibrate-tso --fin {}...".format(reffin))
+        rc = _common.run_command('calibrate_tso', calibrate + ['--fin', reffin], cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
+
         print("Running tica-wcs-step1-allcam-allccd...")
         rc = _common.run_command('wcs_step1_allccd', ['--sector', SECTOR, '--dstem', './',
                                                       '--reffin', reffin], cwd=workdir)
         errorflag |= check_step(rc, 'tica-wcs-step1-allcam-allccd', args, mailer, where)
-    else:
-        _common.run_command('darktime', ['--orbit', segment], cwd=workdir)
+        remove_reference_frames(workdir)
 
-    print("Running tica-wcs-step2-allcam-allccd...")
-    rc = _common.run_command('wcs_step2_allccd', ['--sector', SECTOR, '--dstem', './',
-                                                  '--ncores', args.ncores_wcs], cwd=workdir)
-    errorflag |= check_step(rc, 'tica-wcs-step2-allcam-allccd', args, mailer, where)
+        print("Running tica-calibrate-tso --hlspdir...")
+        rc = _common.run_command('calibrate_tso', calibrate + deliver + ['--no_diagnostics'],
+                                 cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
+    else:
+        print("Running tica-calibrate-tso --hlspdir...")
+        rc = _common.run_command('calibrate_tso', calibrate + deliver, cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
+
+        print("Running tica-darktime...")
+        _common.run_command('darktime', ['--orbit', segment], cwd=workdir)
 
     tidy_segment(workdir, segment)
 
-    print("Running tica-stage-delivery...")
-    _common.run_command('stage_delivery', ['v01', delivery, segment, SECTOR], cwd=workdir)
+    print("Running tica-stage-delivery --ref-stars-only...")
+    _common.run_command('stage_delivery', ['v01', delivery, segment, SECTOR, '--ref-stars-only'],
+                        cwd=workdir)
 
     print("Running tica-check-delivery...")
     if _common.run_command('check_delivery', [delivery], cwd=workdir) != 0:

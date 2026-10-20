@@ -3,6 +3,8 @@ import os
 import sys
 
 from tica.cli import _common
+from wcs_build.tic_catalog import PROVIDERS
+from wcs_build.tic_postgres import default_service
 
 DESCRIPTION = """\
 Run tica-wcs-step1 for all 16 CCDs in parallel.
@@ -17,7 +19,10 @@ This command assumes TSO format FFIs and naming conventions (see
 tica-calibrate-tso), in <dstem>cam<i>_ccd<j>/. TSO format files are not
 publicly available; see tica-calibrate-spoc and tica-wcs-spoc for SPOC FFIs.
 
-Exit codes: 0 success; 1 at least one CCD failed; 2 configuration error."""
+The TIC is read with --catalog and --tic-service, passed on to tica-wcs-step1.
+
+Exit codes: 0 success; 1 at least one CCD failed; 2 configuration error,
+including a CCD that could not reach the TIC."""
 
 
 def build_parser():
@@ -31,6 +36,11 @@ def build_parser():
     parser.add_argument("--dstem", required=True, metavar="DIRECTORY",
                         help="directory containing the cam<i>_ccd<j> directories, with a "
                         "trailing slash (e.g. ./)")
+    parser.add_argument("--catalog", choices=PROVIDERS, default='postgres',
+                        help="where to get the TIC from (default: %(default)s)")
+    parser.add_argument("--tic-service", default=default_service(),
+                        help="libpq service for --catalog postgres [TICA_TIC_SERVICE] "
+                        "(default: %(default)s)")
     return parser
 
 
@@ -59,11 +69,15 @@ def main(argv=None):
             jobs.append(('wcs_step1',
                          ['-s', args.sector, '-ca', iCam, '-cd', jCcd, '-ri'] + USE_REF
                          + ['-o', USE_OUT, '-dbg', DEBUGIT,
-                            '-l', 'tica_logs/tica_wcs_step1_cam{}_ccd{}.log'.format(iCam, jCcd)]))
+                            '-l', 'tica_logs/tica_wcs_step1_cam{}_ccd{}.log'.format(iCam, jCcd),
+                            '--catalog', args.catalog, '--tic-service', args.tic_service]))
 
     #set a flag if there are errors.
     #this lets us processes everything, but make a note of issues
-    return 1 if any(_common.run_parallel(jobs)) else 0
+    rcs = _common.run_parallel(jobs)
+    if 2 in rcs:
+        return 2
+    return 1 if any(rcs) else 0
 
 
 if __name__ == "__main__":

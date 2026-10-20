@@ -4,7 +4,7 @@ Open items found while reviewing installation and the production scripts (2026-1
 
 ## `tica-doall-automate` (production cron job)
 
-This command (`src/tica/cli/doall_automate.py`; a bash script in `bin/` until the `cli-entry-points` branch) runs the TICA production pipeline on MIT's POC machines. It finds the newest orbit in `/pdo/poc-data/orbits/`, skips segments already listed in `tica-processing-records.txt`, and then runs, in order: ephemeris refresh, `tica-calibrate-tso`, `tica-darktime`, WCS steps 1 (on `o1a` only) and 2, `tica-stage-delivery`, and `tica-check-delivery`. It emails a fixed list of recipients and appends to the processing records.
+This command (`src/tica/cli/doall_automate.py`; a bash script in `bin/` until the `cli-entry-points` branch) runs the TICA production pipeline on MIT's POC machines. It finds the newest orbit in `/pdo/poc-data/orbits/`, skips segments already listed in `tica-processing-records.txt`, and then runs, in order: ephemeris refresh, `tica-calibrate-tso`, `tica-darktime`, WCS steps 1 (on `o1a` only) and 2, `tica-stage-delivery`, and `tica-check-delivery`. (Since the `single-write-pipeline` branch, calibration and WCS step 2 run together and write straight to the delivery directory; see `tica-doall-automate --help`.) It emails a fixed list of recipients and appends to the processing records.
 
 ### Bugs
 
