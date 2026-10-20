@@ -154,7 +154,7 @@ echo $msg | mail -s "tica s$SECTOR $segment proceessing started" mmfausnaugh@gma
 
 
 echo "Running tica-dump-ephemeris"
-tica-dump-ephemeris.py --ephemeris "/pdo/poc-data/kernels/pdo_tess_setup.tm" --outdir "/pdo/users/faus/python/tica/btjd/"
+tica-dump-ephemeris.py --ephemeris "/pdo/poc-data/kernels/pdo_tess_setup.tm" --outdir "/pdo/users/faus/python/tica/src/btjd/"
 
 if [[ -d "/data/tess/image_sub/sector$SECTOR" ]]; then
     cd "/data/tess/image_sub/sector$SECTOR"

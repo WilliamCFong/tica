@@ -46,6 +46,7 @@ Repository = "https://github.com/mmfausnaugh/tica"
 Documentation = "https://archive.stsci.edu/hlsp/tica"
 
 [tool.setuptools]
+package-dir = {"" = "src"}
 packages = ["tica", "btjd", "wcs_build"]
 script-files = [
     "bin/tica-cal-ccd2ccd",
@@ -61,13 +62,13 @@ script-files = [
     "bin/tica-wcs-step1-allcam-allccd",
     "bin/tica-wcs-step2-allcam-allccd",
     "bin/tica-wcs-spoc",
-    "wcs_build/step1_get_refimg_ctrlpts.py",
-    "wcs_build/step2_mkwcs.py",
+    "src/wcs_build/step1_get_refimg_ctrlpts.py",
+    "src/wcs_build/step2_mkwcs.py",
     "bin/tica-check-delivery",
     "bin/tica-stage-delivery",
     "bin/tica-darktime",
     "bin/tica-doall-automate",
-    "btjd/tica-dump-ephemeris.py",
+    "src/btjd/tica-dump-ephemeris.py",
 ]
 
 [tool.setuptools.dynamic]

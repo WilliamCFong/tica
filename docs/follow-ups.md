@@ -11,7 +11,7 @@ This script runs the TICA production pipeline on MIT's POC machines. It finds th
 1. ~~**Exit codes are misread in every error handler**~~ *Fixed on `fix-doall-exit-codes`. That branch also fixes `tica-wcs-step1-allcam-allccd` and `tica-wcs-step2-allcam-allccd`: they set `errorflag` inside background jobs, where it never reached the parent shell, so they always exited 0.* (lines 172–180, 189–197, 215–223, 233–241). Inside `cmd || { if [[ $? == 2 ]] …; elif [[ $? == 1 ]] …; else …; fi }`, the second `$?` is the result of the first `[[ … ]]` test (1), not the command's exit code. As a result, every failure other than code 2 is treated as recoverable and processing continues, and the "Unknown error, abort!" branches can never run. Fix: capture the code once, e.g. `cmd || { rc=$?; case $rc in 2) …;; 1) …;; *) …;; esac; }`.
 2. ~~**The duplicate-run guard checks the wrong `$?`**~~ *Fixed on `fix-doall-exit-codes`.* (line 144). `$?` there belongs to the preceding `echo`, so the condition is always true. The guard still works, because the regex match on the next line does the real check, but it reads as if grep's exit code were tested. Also, `[[ $compstr =~ $checkstr ]]` treats the record line as a regex. Use a quoted match (`== *"$checkstr"*`) or `grep -qF`.
 3. **The records file is copied back to the repository only in the "major error" branch** (line 306). The success and ordinary-error branches never sync it, so `tica-processing-records.txt` in the repo lags behind production. Move the copy after the branches, or stop tracking the file in git.
-4. **The ephemeris refresh and the ephemeris used by step 2 can diverge.** `tica-dump-ephemeris.py --outdir /pdo/users/faus/python/tica/btjd/` writes into the source checkout. Since the `fix-install-docker` branch, `step2_mkwcs.py` reads `tess_ephem.txt` from the installed `btjd` package. With an editable install (`pip install -e`) these are the same file. With a regular install, step 2 would silently use the ephemeris from install time. Either keep production on an editable install (and document why), or have the dump write to a configurable location that step 2 reads, e.g. an environment variable.
+4. **The ephemeris refresh and the ephemeris used by step 2 can diverge.** `tica-dump-ephemeris.py --outdir /pdo/users/faus/python/tica/src/btjd/` writes into the source checkout. Since the `fix-install-docker` branch, `step2_mkwcs.py` reads `tess_ephem.txt` from the installed `btjd` package. With an editable install (`pip install -e`) these are the same file. With a regular install, step 2 would silently use the ephemeris from install time. Either keep production on an editable install (and document why), or have the dump write to a configurable location that step 2 reads, e.g. an environment variable.
 
 ### Robustness and maintenance
 
@@ -33,9 +33,9 @@ This script runs the TICA production pipeline on MIT's POC machines. It finds th
 
 ## Code health
 
-14. **Dead helpers reference an undefined `FitsFrame`** (`tica/tica.py`: `sum_frames`, `subtract_frames`, `mean_frames`, `median_frames`). Remove them, or point them at `CCD`.
-15. **`wcs_build/step0_showquickbackground.py` uses `np.float`/`np.int`,** which were removed in numpy 1.24. It isn't installed or tested, so it fails only when run directly.
-16. **Lint backlog:** `ruff check --select F401,F811 tica btjd wcs_build bin/tica-cal-ccd2ccd` reports 28 unused imports and 5 redefinitions. Fix these mechanically in a separate commit (`ruff check --fix`), then run the regression test.
+14. **Dead helpers reference an undefined `FitsFrame`** (`src/tica/tica.py`: `sum_frames`, `subtract_frames`, `mean_frames`, `median_frames`). Remove them, or point them at `CCD`.
+15. **`src/wcs_build/step0_showquickbackground.py` uses `np.float`/`np.int`,** which were removed in numpy 1.24. It isn't installed or tested, so it fails only when run directly.
+16. **Lint backlog:** `ruff check --select F401,F811 src bin/tica-cal-ccd2ccd` reports 28 unused imports and 5 redefinitions. Fix these mechanically in a separate commit (`ruff check --fix`), then run the regression test.
 
 ## Infrastructure
 

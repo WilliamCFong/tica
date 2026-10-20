@@ -152,7 +152,7 @@ To run `run_reg_test.py`, it is necessary to pull the input data, output checks,
 
 In very rare cases, `output_checks` will be updated if we implement changes that improve the TICA calibration or WCSs.  Changes to the output checks are under version control with the `reg_test/output_checks.dvc` file, and can be updated in the same way as the calibration models (see below).
 
-Note that the regression test does not check `tica/wcs_build/step1_get_refimg_ctrlpts.py`, which generates the table of stars used for WCS fitting.  
+Note that the regression test does not check `tica/src/wcs_build/step1_get_refimg_ctrlpts.py`, which generates the table of stars used for WCS fitting.  
 
 ## Updating and Reverting Calibration Models
 
@@ -175,7 +175,7 @@ Calibration models also exist for 20-second and 2-minute data, but calibrating r
 
 ## Data Structures and Calibration Algorithms
 
-Algorithms used for pixel calibrations can be found in `tica/tica/tica.py`.  In particular, `CCD.calibrate` is the function that produces the calibrated data.  
+Algorithms used for pixel calibrations can be found in `tica/src/tica/tica.py`.  In particular, `CCD.calibrate` is the function that produces the calibrated data.  
 
 Some users may find the data structures in `tica.py` useful for their own scripts.  We recommend using `bin/tica-cal-ccd2ccd` or `bin/tica-cal-ffi2ccds` as a guide for scripting with TICA data structures.
 
