@@ -40,6 +40,15 @@ dev = ["pytest>=7.0", "pytest-cov", "ruff", "pre-commit"]
 # DVC fetches calibration models and regression-test data
 data = ["dvc>=3.0"]
 
+[project.scripts]
+tica-cal-ccd2ccd = "tica.cli.cal_ccd2ccd:main"
+tica-cal-ffi2ccds = "tica.cli.cal_ffi2ccds:main"
+tica-cal-ffi2ffi = "tica.cli.cal_ffi2ffi:main"
+tica-ccd-report = "tica.cli.ccd_report:main"
+tica-ffi2ccds = "tica.cli.ffi2ccds:main"
+tica-ccds2ffi = "tica.cli.ccds2ffi:main"
+tica-trim-ccds2ffi = "tica.cli.ccds2ffi:main_trim"
+
 [project.urls]
 Homepage = "https://tessgit.mit.edu/tica/tica"
 Repository = "https://github.com/mmfausnaugh/tica"
@@ -47,16 +56,9 @@ Documentation = "https://archive.stsci.edu/hlsp/tica"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["tica", "btjd", "wcs_build"]
+packages = ["tica", "tica.cli", "btjd", "wcs_build"]
 script-files = [
-    "bin/tica-cal-ccd2ccd",
-    "bin/tica-cal-ffi2ccds",
-    "bin/tica-cal-ffi2ffi",
-    "bin/tica-ccd-report",
     "bin/tica-production-table",
-    "bin/tica-ffi2ccds",
-    "bin/tica-ccds2ffi",
-    "bin/tica-trim-ccds2ffi",
     "bin/tica-calibrate-spoc",
     "bin/tica-calibrate-tso",
     "bin/tica-wcs-step1-allcam-allccd",
