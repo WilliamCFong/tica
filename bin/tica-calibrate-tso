@@ -17,11 +17,13 @@ orbseg=''
 #orbit-${o1}/ffi_fits and same for o2
 dstem=''
 CALDIR=''
+#directory for outputs; defaults to the current directory
+outdir=''
 
 NCORES=''
 
 USAGE="
-  Usage: tica-calibrate-tso o1=<orbit1> o2=<orbit2> orbseg=<str> dstem=<data_dir_path> CALDIR=<calibration_dir_path> NCORES=<int>
+  Usage: tica-calibrate-tso o1=<orbit1> o2=<orbit2> orbseg=<str> dstem=<data_dir_path> CALDIR=<calibration_dir_path> NCORES=<int> [--outdir <output_dir_path>]
 
    This script sets up directories and runs tica-cal-ffi2ccds.
      tica-cal-ffi2ccds is a python script that reads TESS Science
@@ -58,6 +60,16 @@ USAGE="
 
    <int> is the number of cores to use for parallel processing.  Defaults to 1.
 
+   <output_dir_path> is the directory in which to write the calibrated
+     FFIs (in cam<i>_ccd<j>/ subdirectories) and logs (in tica_logs/).
+     It is created if needed, and defaults to the current directory.
+     Can also be given as outdir=<output_dir_path>. Run later steps
+     (tica-darktime, tica-wcs-step1/2-allcam-allccd) from inside this
+     directory.
+
+   <data_dir_path>, <calibration_dir_path>, and <output_dir_path> may
+     be absolute or relative to the directory you run this script from.
+
 "
 
 #exit code 2 is a harder stop, makes automation bash script exit
@@ -69,6 +81,10 @@ USAGE="
 while [ $# -gt 0 ] ; do
   case $1 in
     "-h" | "--help") echo "$USAGE" ; exit 2 ;;
+    "--outdir")
+	[[ $# -lt 2 || "$2" == '' ]] && { echo "$USAGE" ; echo "--outdir needs a directory: --outdir <output_dir_path>" ; exit 2 ; }
+	outdir="$2" ; shift ;;
+    --outdir=*) outdir="${1#--outdir=}" ;;
     *)         eval $1 ;;
   esac
   shift
@@ -97,12 +113,20 @@ done
 [[ "$orbseg" =~ 'o1'  ]] && [[ $o2 != 'None' ]] && { echo "Configuration Error. o1 is set, but orbseg requested something from orbit 1. orbseg must match the orbit that is set."; exit 2 ;}
 [[ "$orbseg" =~ 'o2'  ]] && [[ $o1 != 'None' ]] && { echo "Configuration Error. o1 is set, but orbseg requested something from orbit 2.  orbseg must match the orbit that is set."; exit 2 ;}
 
+#make input paths absolute, since the script changes directories below
+dstem=$(cd "$dstem" && pwd) || { echo "Configuration Error. dstem is not a directory."; exit 2 ;}
+CALDIR=$(cd "$CALDIR" && pwd) || { echo "Configuration Error. CALDIR is not a directory."; exit 2 ;}
+
+if [[ "$outdir" != '' ]]; then
+    mkdir -p "$outdir" && cd "$outdir" || { echo "Configuration Error. Cannot create or enter outdir $outdir."; exit 2 ;}
+fi
+
 for i in 1 2 3 4; do
     for j in 1 2 3 4; do
-	mkdir cam${i}_ccd${j}
+	mkdir -p cam${i}_ccd${j}
     done
 done
-mkdir tica_logs
+mkdir -p tica_logs
 
 
 #make inlist for tica, 
