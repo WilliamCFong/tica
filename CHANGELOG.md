@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tica-production-table` raised `IndexError` instead of printing its mismatch warnings.
 - `tica-darktime` no longer blocks on a plot window at the end (use `--show`).
 - `tica-overclock-stats` works and is installed.
+- `tica-calibrate-tso` lists `ffi_fits-haho` files when no `--orbseg` is given (a brace typo meant it never did), and no longer misreads segment stamps when a parent directory contains "tess".
+- `tica-wcs-spoc` works with any `--dstem`, not just `.`; matches star lists by zero-padded sector; only fits calibrated FFIs; and exits 1 when a CCD fails.
+- `tica-calibrate-spoc` rewrites `inlist` instead of appending to it, so reruns don't list every FFI twice.
+- `tica-doall-automate` moves each segment's `cal_timeseries_<segment>.png` and every CCD's `bad_calibration.txt` into the segment directory, and copies the records file to `--records-copy` after every finished run.
 ### Removed
 - `bin/`: every script there is now a `tica.cli` entry point.
 - Unused `gdrive` DVC remote, which made DVC commands fail without the dvc-gdrive plugin.
