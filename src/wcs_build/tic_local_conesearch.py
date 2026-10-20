@@ -11,15 +11,11 @@ author:  Michael Fausnaugh
 """
 
 import numpy as np
-import os
-import sys
 import json
 import time
 
 import psycopg2
 
-DIR = os.path.abspath(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(DIR, '..'))
 
 try:
     from wcs_build.tic_postgres_param import  tic_host, tic_db, tic_user, tic_port, password

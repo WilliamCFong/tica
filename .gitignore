@@ -6,7 +6,7 @@ build
 *~
 *.egg-info
 *png
-wcs_build/tic_postgres_param.py
+src/wcs_build/tic_postgres_param.py
 .venv
 .pytest_cache
 /data

@@ -63,7 +63,7 @@ endif
 install:
 	mkdir $(PREFIX)
 	rsync -arv bin $(PREFIX)
-	rsync -arv tica $(PREFIX)
+	rsync -arv src/tica $(PREFIX)
 #	rsync -arv examples $(PREFIX)
 	rsync -arv calibration_* $(PREFIX)
 	cp -p README.md LICENSE AUTHORS $(PREFIX)

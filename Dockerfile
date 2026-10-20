@@ -24,9 +24,7 @@ FROM base AS runtime
 COPY requirements.lock ./
 RUN pip install --require-hashes --no-deps -r requirements.lock
 COPY pyproject.toml VERSION README.md LICENSE ./
-COPY tica/ tica/
-COPY btjd/ btjd/
-COPY wcs_build/ wcs_build/
+COPY src/ src/
 COPY bin/ bin/
 RUN pip install --no-deps . \
     && pip check \
@@ -50,9 +48,7 @@ COPY requirements-dev.lock ./
 RUN pip install --require-hashes --no-deps -r requirements-dev.lock
 WORKDIR /app
 COPY pyproject.toml VERSION README.md LICENSE ./
-COPY tica/ tica/
-COPY btjd/ btjd/
-COPY wcs_build/ wcs_build/
+COPY src/ src/
 COPY bin/ bin/
 # Editable install: the checkout bind-mounted over /app is what gets imported.
 # Scripts are copied at install time, so prefer the live ones from the checkout.

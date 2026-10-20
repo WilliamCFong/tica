@@ -24,8 +24,8 @@ py-spy at 200 Hz on the locked stack. Percentages are shares of sampled CPU time
 
 The compression time is split evenly between two writes of the same file:
 
-- `tica/tica.py:733`: `write_calibrate` writes `*.cal.fits.gz` (25%).
-- `wcs_build/step2_mkwcs.py:1222`: step 2 rewrites the whole file with the WCS added (25%).
+- `src/tica/tica.py:733`: `write_calibrate` writes `*.cal.fits.gz` (25%).
+- `src/wcs_build/step2_mkwcs.py:1222`: step 2 rewrites the whole file with the WCS added (25%).
 
 `write_calibrate` gzips by default (unless `no_gzip`), using Python's default gzip level of 9. On one calibrated FFI:
 

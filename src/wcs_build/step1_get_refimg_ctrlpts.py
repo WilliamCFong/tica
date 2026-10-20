@@ -20,14 +20,11 @@ import matplotlib.pyplot as plt
 import h5py
 
 import os
-import sys
 
 import tica
 from time import time
 import logging
 
-DIR = os.path.abspath(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(DIR, '..'))
 
 #from wcs_build.mast_filter_conesearch import mast_filter_conesearch
 from wcs_build.tic_local_conesearch import tic_local_conesearch

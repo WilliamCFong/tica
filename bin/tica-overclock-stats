@@ -2,7 +2,6 @@
 import scipy as sp
 from astropy.io import fits
 import sys
-sys.path.insert(0,'/pcds/users/faus/tica/')
 from tica.tica import *
 import glob
 from astropy.table import Table
