@@ -50,7 +50,7 @@ Run TICA on your data with the `tica` service. The repository is mounted read-on
 
 ```
 export TICA_DATA=/path/to/my/ffis    # contains raw/ with the *ffir*.fits files
-docker compose run --rm tica tica-calibrate-spoc input_dir=/data/raw CALDIR=/tica/calibration_10min
+docker compose run --rm tica tica-calibrate-spoc --input-dir /data/raw --caldir /tica/calibration_10min
 ```
 
 The makefile sets `TICA_UID`/`TICA_GID` to your user so that output files are owned by you. If you call `docker compose` directly, export them yourself (`export TICA_UID=$(id -u) TICA_GID=$(id -g) TICA_VERSION=$(cat VERSION)`).
@@ -104,11 +104,11 @@ Note that there are 21G of total data in all of the calibration models, most of 
 
 ## Quick Start
 
-During installation, all TICA scripts are installed in the `$PATH` of your working environment and are available from the command line.  The scripts are also located in the `bin/` directory.
+During installation, all TICA commands (`tica-*`) are installed in the `$PATH` of your working environment and are available from the command line.  Every command has a `--help` option.  Their source is in `src/tica/cli/`.
 
 The workhorse script for calibrating raw TESS data is `tica-cal-ccd2ccd`, and can be run with `--help` to  see an explanation of the available options.  
 
-An example bash script that runs TICA on raw FFIs is `tica-calibrate-spoc`.  This script is also installed in your working environment and a help option is  available (run with `--help` or with no arguments). 
+A command that runs TICA on a directory of raw FFIs is `tica-calibrate-spoc` (run it with `--help` for its options).
 
 Raw TESS FFIs should be downloaded from MAST (https://archive.stsci.edu/tess/bulk_downloads/bulk_downloads_ffi-tp-lc-dv.html). From that link, scroll down to "Uncalibrated FFIs," and you will be able to download a `.sh` script that uses `curl` to fetch raw SPOC FFI files (`*ffir*fits` files).  Note that the `.sh` script will download an entire sector of FFIs by default; you may want to edit the script to download just a few raw FFIs to start.
 
@@ -117,12 +117,12 @@ Once the raw data are downloaded, the user gives `tica-calibrate-spoc` the locat
 ```
 mkdir tica_outputs
 cd tica_outputs
-tica-calibrate-spoc input_dir=/path/to/raw/data CALDIR=~/python/tica/calibration_10min
+tica-calibrate-spoc --input-dir /path/to/raw/data --caldir ~/python/tica/calibration_10min
 ```
 
-`bin/tica-calibrate-spoc` likely covers 99% of use cases.  Users can also write their own scripts to call `tica-cal-ccd2ccd`, or they can run `tica-cal-ccd2ccd` directly from the command line.
+`tica-calibrate-spoc` likely covers 99% of use cases.  Users can also write their own scripts to call `tica-cal-ccd2ccd`, or they can run `tica-cal-ccd2ccd` directly from the command line.
 
-Several other scripts are also installed by default.  These scripts are used to calibrate FFIs for MIT's [Quick Look Pipeline](https://archive.stsci.edu/hlsp/qlp) at the Payload Operations Center/TESS Science Office (POC/TSO).  Note that the POC/TSO FFIs are formatted differently than the SPOC `*ffir*fits` files available at MAST.  However, the POC/TSO FFIs are not publicly available at this time.
+Several other commands are also installed by default.  These commands are used to calibrate FFIs for MIT's [Quick Look Pipeline](https://archive.stsci.edu/hlsp/qlp) at the Payload Operations Center/TESS Science Office (POC/TSO).  Note that the POC/TSO FFIs are formatted differently than the SPOC `*ffir*fits` files available at MAST.  However, the POC/TSO FFIs are not publicly available at this time.
 
 ### Setting the calibration directory
 
@@ -177,7 +177,7 @@ Calibration models also exist for 20-second and 2-minute data, but calibrating r
 
 Algorithms used for pixel calibrations can be found in `tica/src/tica/tica.py`.  In particular, `CCD.calibrate` is the function that produces the calibrated data.  
 
-Some users may find the data structures in `tica.py` useful for their own scripts.  We recommend using `bin/tica-cal-ccd2ccd` or `bin/tica-cal-ffi2ccds` as a guide for scripting with TICA data structures.
+Some users may find the data structures in `tica.py` useful for their own scripts.  We recommend using `src/tica/cli/cal_ccd2ccd.py` or `src/tica/cli/cal_ffi2ccds.py` as a guide for scripting with TICA data structures.
 
 
 
@@ -187,5 +187,5 @@ There are two WCSs available to end-users: SPOC WCSs in the `*ffir*`/`*ffic*` fi
 
 The WCS differences can be analyzed by comparing the transforms of stars using the two WCSs.  For TICA, astrometric residuals from the WCSs of the fitted stars are also given in a binary table extension for every FFI.
 
-We recommend that users employ the existing WCSs to analyze these astrometric differences.  However, as a scripting example, we have provided a bash script that refits the TICA WCSs and overwrites the WCS keywords in the SPOC `*ffir*` files.  This script is `bin/tica-wcs-spoc`.  This bash script is installed in the user's environment and has a help menu (use `--help` or call with no arguments).
+We recommend that users employ the existing WCSs to analyze these astrometric differences.  However, as a scripting example, we have provided a command that refits the TICA WCSs and overwrites the WCS keywords in the SPOC `*ffir*` files: `tica-wcs-spoc` (see `tica-wcs-spoc --help`).
 

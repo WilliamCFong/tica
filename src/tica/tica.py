@@ -859,9 +859,9 @@ class FFI(object):
                 
         try:
             hdulist.writeto(hdupath)
-            self.logger.info("generating output calibration file: {}".foramt( hdupath) )
+            self.logger.info("generating output calibration file: {}".format( hdupath) )
         except IOError:
-            self.logger.info("output calibrated file already exists, skipping generation: {}".foramt(  hdupath) )
+            self.logger.info("output calibrated file already exists, skipping generation: {}".format(  hdupath) )
 
 
 
@@ -1059,7 +1059,7 @@ class FFI_File(FFI):
                 hdulist.writeto(hdupath)
                 ccd.logger.info("generating output calibration file: {}".format( hdupath) )
             except IOError:
-                ccd.logger.info("output calibrated file already exists, skipping generation: {}".foramt(  hdupath) )
+                ccd.logger.info("output calibrated file already exists, skipping generation: {}".format(  hdupath) )
 
 
 

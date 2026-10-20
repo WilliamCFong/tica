@@ -1,14 +1,10 @@
-#!/usr/bin/env python
-
-import numpy as np
-import matplotlib.pyplot as plt
-from astropy.io import fits
-#import sys
-import glob
+import argparse
 import os
 import re
-import argparse
+import sys
 
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 #need reference image for WCS.  not too strigent, should be dark time. 1 image
@@ -32,7 +28,7 @@ def clean_islands(FFInums, mask_keep, N_ffis_per_island):
         idx = good_idx[ii]
 
         if idx != min_idx:
-            dt1 = FFInums[idx] - FFInums[good_idx[ii - 1 ] ]            
+            dt1 = FFInums[idx] - FFInums[good_idx[ii - 1 ] ]
             #print(dt1)
             #if next time interval is smaller than 1hr = 18 FFIs, grab
             #these FFIs
@@ -49,7 +45,7 @@ def clean_islands(FFInums, mask_keep, N_ffis_per_island):
                 #print(idx,dt2,'in dt2 additions')
                 m = (FFInums > FFInums[idx]) & ( FFInums < FFInums[good_idx[ii + 1 ]])
                 island_keep[ m ] = 1
-        
+
     return island_keep + mask_keep
 
 
@@ -57,11 +53,9 @@ def clean_islands(FFInums, mask_keep, N_ffis_per_island):
 #N_low_modes = 3
 #mode_sigma = 5
 frac_above_min = 1.10
-#N_ffis_per_island = 18
 
 
-
-if __name__ == "__main__":
+def build_parser():
     description_string = """
 
     This script reads cal_timeseries.txt files, and identifies periods
@@ -76,7 +70,8 @@ if __name__ == "__main__":
 
     """
 
-    parser = argparse.ArgumentParser(description = description_string)
+    parser = argparse.ArgumentParser(prog='tica-darktime', description = description_string,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--mode_sigma",type=float,default=8.0,
                         help="Determines threshold for rms_list.  "
                         "rms_list is longest stretch of dark time, "
@@ -110,7 +105,14 @@ if __name__ == "__main__":
                         help="If set, addes the orbit name to the image title and filename."
                         "If not set, just ignores.")
 
-    args = parser.parse_args()
+
+    parser.add_argument("--show", action='store_true',
+                        help="Show the diagnostic plots in a window after saving them.")
+    return parser
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     if args.save_reffin:
         if os.path.isfile('reffin.txt'):
@@ -125,7 +127,7 @@ if __name__ == "__main__":
                                                          9,10,11,12,
                                                          13,14,15,16,
                                                          17,18,19,20))
-        
+
         #data =np.array(data).T
         #unique_modes = np.sort(np.unique(mode))
         FFInum_all = np.array([ int(e.split('-')[1]) for e in fname_all  ])
@@ -135,7 +137,7 @@ if __name__ == "__main__":
         fname_all=fname_all[idx]
         data_all = data_all[idx]
 
-        
+
 
         F,( axes ) = plt.subplots(4, 2,sharex='all')
 
@@ -148,9 +150,9 @@ if __name__ == "__main__":
                 axes[jj][1].plot(FFInum_all, data_all['outputB_ccd{}'.format(jj+1)], 'k.')
                 axes[jj][1].plot(FFInum_all, data_all['outputC_ccd{}'.format(jj+1)], 'k.')
                 axes[jj][1].plot(FFInum_all, data_all['outputD_ccd{}'.format(jj+1)], 'k.')
-            except:
+            except Exception:
                 pass
-            
+
 
 
             ########################################################
@@ -170,8 +172,8 @@ if __name__ == "__main__":
                 low = np.ones(len(FFInum_all))*(np.median(overclock_correct)  - 18*scatter)
                 high = np.ones(len(FFInum_all))*(np.median(overclock_correct) + 18*scatter)
                 axes[jj][1].fill_between(FFInum_all, high, low, facecolor='k',alpha=0.2)
-                
-                axes[jj][1].plot(FFInum_all[bad_cal_trim], 
+
+                axes[jj][1].plot(FFInum_all[bad_cal_trim],
                                  data_all['output{}_ccd{}'.format(output_channel,
                                                                   jj+1)][bad_cal_trim], 'r.')
 
@@ -179,7 +181,7 @@ if __name__ == "__main__":
                 #mode = 0 is set if saturation is not yet spiking the overclocks,
                 #but imaging array is near zero or negative
                 bad_cal_trim += data_all[ccduse] == 0
-                
+
             if len(np.where(bad_cal_trim)[0]) > 0:
                 np.savetxt('cam{}_ccd{}/bad_calibration.txt'.format(ii + 1, jj+1),
                            np.c_[FFInum_all[bad_cal_trim] ],
@@ -192,7 +194,7 @@ if __name__ == "__main__":
                 FFInum = FFInum_all
                 fname  = fname_all
 
-                
+
             ########################################################
             #rms_list
             ########################################################
@@ -219,10 +221,10 @@ if __name__ == "__main__":
             m = clean_islands(FFInum, m, args.N_ffis_per_island)
 
             axes[jj][0].plot(FFInum[m], data[ccduse][m],'b.',
-                             label='$<$ {}$\sigma$ of lowest bkg'.format(args.mode_sigma) )
-            l,h = axes[jj][0].get_xlim()
-            axes[jj][0].plot([l,h], [thresh,thresh],'b--')
-            axes[jj][0].set_xlim([l,h])
+                             label=r'$<$ {}$\sigma$ of lowest bkg'.format(args.mode_sigma) )
+            lo,hi = axes[jj][0].get_xlim()
+            axes[jj][0].plot([lo,hi], [thresh,thresh],'b--')
+            axes[jj][0].set_xlim([lo,hi])
 
             #make_rms(FFInum[m],ii+1,jj+1,'mask2_rms.fits')
             #seems to work well for dark time interval, save for rms_list
@@ -241,7 +243,7 @@ if __name__ == "__main__":
                        np.c_[outnames],fmt='%s')
 
 
-            
+
             ########################################################
             #REFFIN
             ########################################################
@@ -250,16 +252,16 @@ if __name__ == "__main__":
             idxs = np.where(m)[0]
             idx = idxs[ len(idxs)//2 ]
             reffin = FFInum[idx]
-            
+
             if args.save_reffin:
                 with open('reffin.txt','a') as fout:
                     fout.write('cam{}_ccd{} {:08d}\n'.format( ii + 1, jj + 1,
-                                                              int(FFInum[idx]))  )  
+                                                              int(FFInum[idx]))  )
 
-            l,h = axes[jj][0].get_ylim()
+            lo,hi = axes[jj][0].get_ylim()
             axes[jj][0].plot([reffin,reffin],
-                             [l,h],'k--')
-            axes[jj][0].set_ylim([l,h])
+                             [lo,hi],'k--')
+            axes[jj][0].set_ylim([lo,hi])
 
             ########################################################
             #ref_list
@@ -301,13 +303,13 @@ if __name__ == "__main__":
                 axes[jj][0].plot(FFInum[idxs],data['mode_ccd{}'.format(jj+1)][idxs],
                                  '.',color='purple',
                                  label='Trimmed times for ref')
-                
-                l,h = axes[jj][0].get_ylim()
+
+                lo,hi = axes[jj][0].get_ylim()
                 for idx_r in idx_ref:
-                
+
                     axes[jj][0].plot([FFInum[idx_r],FFInum[idx_r]],
-                                     [l,h],'r--')
-                axes[jj][0].set_ylim([l,h])
+                                     [lo,hi],'r--')
+                axes[jj][0].set_ylim([lo,hi])
 
 
 
@@ -340,20 +342,26 @@ if __name__ == "__main__":
             F.suptitle('cam{} sector{} o{}'.format(ii+1, sector, args.orbit), )
         else:
             F.suptitle('cam{} sector{}'.format(ii+1, sector), )
-        
+
         axes[0][0].set_title('Image mode (background)')
 
         axes[00][0].legend(fontsize=8)
 
         axes[0][1].set_title('1D Bias correction')
-                   
+
         F.set_size_inches(12,8)
         F.subplots_adjust(hspace=0)
 
-        
+
         if args.orbit:
             F.savefig(os.path.join( os.path.dirname(infile), 'cal_timeseries_{}.png' .format(args.orbit) ) )
         else:
             F.savefig(os.path.join( os.path.dirname(infile), 'cal_timeseries.png') )
-    plt.show()
-        
+
+    if args.show:
+        plt.show()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

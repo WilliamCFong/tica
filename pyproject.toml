@@ -40,6 +40,29 @@ dev = ["pytest>=7.0", "pytest-cov", "ruff", "pre-commit"]
 # DVC fetches calibration models and regression-test data
 data = ["dvc>=3.0"]
 
+[project.scripts]
+tica-cal-ccd2ccd = "tica.cli.cal_ccd2ccd:main"
+tica-cal-ffi2ccds = "tica.cli.cal_ffi2ccds:main"
+tica-cal-ffi2ffi = "tica.cli.cal_ffi2ffi:main"
+tica-ccd-report = "tica.cli.ccd_report:main"
+tica-ffi2ccds = "tica.cli.ffi2ccds:main"
+tica-ccds2ffi = "tica.cli.ccds2ffi:main"
+tica-trim-ccds2ffi = "tica.cli.ccds2ffi:main_trim"
+tica-wcs-step1 = "tica.cli.wcs_step1:main"
+tica-wcs-step2 = "tica.cli.wcs_step2:main"
+tica-dump-ephemeris = "tica.cli.dump_ephemeris:main"
+tica-darktime = "tica.cli.darktime:main"
+tica-check-delivery = "tica.cli.check_delivery:main"
+tica-production-table = "tica.cli.production_table:main"
+tica-overclock-stats = "tica.cli.overclock_stats:main"
+tica-calibrate-spoc = "tica.cli.calibrate_spoc:main"
+tica-calibrate-tso = "tica.cli.calibrate_tso:main"
+tica-wcs-step1-allcam-allccd = "tica.cli.wcs_step1_allccd:main"
+tica-wcs-step2-allcam-allccd = "tica.cli.wcs_step2_allccd:main"
+tica-wcs-spoc = "tica.cli.wcs_spoc:main"
+tica-stage-delivery = "tica.cli.stage_delivery:main"
+tica-doall-automate = "tica.cli.doall_automate:main"
+
 [project.urls]
 Homepage = "https://tessgit.mit.edu/tica/tica"
 Repository = "https://github.com/mmfausnaugh/tica"
@@ -47,29 +70,7 @@ Documentation = "https://archive.stsci.edu/hlsp/tica"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-packages = ["tica", "btjd", "wcs_build"]
-script-files = [
-    "bin/tica-cal-ccd2ccd",
-    "bin/tica-cal-ffi2ccds",
-    "bin/tica-cal-ffi2ffi",
-    "bin/tica-ccd-report",
-    "bin/tica-production-table",
-    "bin/tica-ffi2ccds",
-    "bin/tica-ccds2ffi",
-    "bin/tica-trim-ccds2ffi",
-    "bin/tica-calibrate-spoc",
-    "bin/tica-calibrate-tso",
-    "bin/tica-wcs-step1-allcam-allccd",
-    "bin/tica-wcs-step2-allcam-allccd",
-    "bin/tica-wcs-spoc",
-    "src/wcs_build/step1_get_refimg_ctrlpts.py",
-    "src/wcs_build/step2_mkwcs.py",
-    "bin/tica-check-delivery",
-    "bin/tica-stage-delivery",
-    "bin/tica-darktime",
-    "bin/tica-doall-automate",
-    "src/btjd/tica-dump-ephemeris.py",
-]
+packages = ["tica", "tica.cli", "btjd", "wcs_build"]
 
 [tool.setuptools.dynamic]
 version = {file = "VERSION"}

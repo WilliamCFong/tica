@@ -24,10 +24,18 @@ SCRIPTS = [
     "tica-trim-ccds2ffi",
     "tica-production-table",
     "tica-darktime",
-    "step1_get_refimg_ctrlpts.py",
-    "step2_mkwcs.py",
+    "tica-check-delivery",
+    "tica-overclock-stats",
+    "tica-wcs-step1",
+    "tica-wcs-step2",
+    "tica-dump-ephemeris",
     "tica-calibrate-spoc",
+    "tica-calibrate-tso",
+    "tica-wcs-step1-allcam-allccd",
+    "tica-wcs-step2-allcam-allccd",
     "tica-wcs-spoc",
+    "tica-stage-delivery",
+    "tica-doall-automate",
 ]
 
 

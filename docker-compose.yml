@@ -4,7 +4,7 @@ x-user: &user "${TICA_UID:-0}:${TICA_GID:-0}"
 
 services:
   # Run TICA on data in $TICA_DATA (default ./data), e.g.
-  #   docker compose run --rm tica tica-calibrate-spoc input_dir=/data/raw CALDIR=/tica/calibration_10min
+  #   docker compose run --rm tica tica-calibrate-spoc --input-dir /data/raw --caldir /tica/calibration_10min
   tica:
     image: tica:${TICA_VERSION:-latest}
     pull_policy: build
