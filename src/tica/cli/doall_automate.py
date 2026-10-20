@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 
+from btjd import EPHEMERIS_ENV, packaged_ephemeris
 from tica.cli import _common
 
 DESCRIPTION = """\
@@ -59,14 +60,21 @@ def _env(name, default):
     return os.environ.get(name, default)
 
 
+def checkout_path(*parts):
+    """A path in the TICA checkout this package runs from, or None without one."""
+    root = _common.checkout_root()
+    return os.path.join(root, *parts) if root else None
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog='tica-doall-automate', description=DESCRIPTION,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--orbit", help="process this orbit instead of the detected one "
                         "(the segment, file counts and stem are still detected from the newest orbit)")
     parser.add_argument("--segment", help="process this segment (e.g. o1a) instead of the detected one")
-    parser.add_argument("--caldir", default=_env("TICA_CALDIR", "/pdo/users/faus/python/tica/calibration_200sec"),
-                        help="calibration models [TICA_CALDIR] (default: %(default)s)")
+    parser.add_argument("--caldir", default=_env("TICA_CALDIR", checkout_path("calibration_200sec")),
+                        help="calibration models [TICA_CALDIR] (default: calibration_200sec in "
+                        "the TICA checkout this runs from: %(default)s)")
     parser.add_argument("--ncores", type=int, default=int(_env("TICA_NCORES", "57")),
                         help="cores for tica-calibrate-tso, which also fits the WCS "
                         "[TICA_NCORES] (default: %(default)s)")
@@ -85,14 +93,19 @@ def build_parser():
                         help="processing records file [TICA_RECORDS] (default: %(default)s)")
     parser.add_argument("--ephemeris-kernel", default=_env("TICA_EPHEMERIS_KERNEL", "/pdo/poc-data/kernels/pdo_tess_setup.tm"),
                         help="SPICE kernel setup file [TICA_EPHEMERIS_KERNEL] (default: %(default)s)")
-    parser.add_argument("--ephemeris-outdir", default=_env("TICA_EPHEMERIS_OUTDIR", "/pdo/users/faus/python/tica/src/btjd/"),
-                        help="directory with tess_ephem.txt to update [TICA_EPHEMERIS_OUTDIR] "
-                        "(default: %(default)s)")
-    parser.add_argument("--records-copy", default=_env("TICA_RECORDS_COPY", "/pdo/users/faus/python/tica/"),
-                        help="directory to copy the records file to after each run, e.g. the "
-                        "production checkout; empty to skip [TICA_RECORDS_COPY] (default: %(default)s)")
-    parser.add_argument("--production-table", default=_env("TICA_PRODUCTION_TABLE", "/pdo/users/faus/python/tica/production_table.md"),
-                        help="production table to update [TICA_PRODUCTION_TABLE] (default: %(default)s)")
+    parser.add_argument("--ephemeris-file", default=_env(EPHEMERIS_ENV, None), metavar="FILE",
+                        help="tess_ephem.txt to update with tica-dump-ephemeris and read in the "
+                        "WCS fit [{}] (default: the copy installed with TICA, {})".format(
+                            EPHEMERIS_ENV, packaged_ephemeris()))
+    parser.add_argument("--records-copy", default=_env("TICA_RECORDS_COPY", checkout_path() or ""),
+                        help="directory to copy the records file to after each run; empty to skip "
+                        "[TICA_RECORDS_COPY] (default: the TICA checkout this runs from, if any: "
+                        "%(default)s)")
+    parser.add_argument("--production-table", default=_env("TICA_PRODUCTION_TABLE",
+                                                           checkout_path("production_table.md")),
+                        help="production table to update [TICA_PRODUCTION_TABLE] (default: "
+                        "production_table.md in the TICA checkout this runs from, or else in "
+                        "--workdir: %(default)s)")
     parser.add_argument("--mail-start", default=_env("TICA_MAIL_START", DEFAULT_MAIL_START),
                         help="comma-separated recipients of the start email [TICA_MAIL_START]")
     parser.add_argument("--mail-success", default=_env("TICA_MAIL_SUCCESS", DEFAULT_MAIL_SUCCESS),
@@ -296,8 +309,12 @@ def run(args, mailer):
                 "An update will be sent when the processing finishes.")
 
     print("Running tica-dump-ephemeris")
-    _common.run_command('dump_ephemeris', ['--ephemeris', args.ephemeris_kernel,
-                                           '--outdir', args.ephemeris_outdir])
+    dump_args = ['--ephemeris', args.ephemeris_kernel]
+    if args.ephemeris_file:
+        # the WCS fit in the later steps reads the same file
+        os.environ[EPHEMERIS_ENV] = args.ephemeris_file
+        dump_args += ['--output', args.ephemeris_file]
+    _common.run_command('dump_ephemeris', dump_args)
 
     workdir = os.path.join(args.workdir, 'sector{}'.format(SECTOR))
     os.makedirs(workdir, exist_ok=True)
@@ -362,8 +379,8 @@ def run(args, mailer):
         with open(args.records, 'a') as f:
             f.write(checkstr + ' finished\n')
         table_args = ['--segments', segment] + (['--wcs1'] if 'o1a' in segment else [])
-        _common.run_command('production_table', table_args + ['--output', args.production_table],
-                            cwd=workdir)
+        table = args.production_table or os.path.join(args.workdir, 'production_table.md')
+        _common.run_command('production_table', table_args + ['--output', table], cwd=workdir)
     else:
         mailer.send("tica s{} {} proceessing".format(SECTOR, segment), args.mail_error,
                     "TICA s{} {} processing complete, but there were errors. Look in {} "
@@ -381,6 +398,10 @@ def run(args, mailer):
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if not args.caldir:
+        print("Configuration Error. No calibration directory: TICA is not running from a "
+              "checkout, so set --caldir or TICA_CALDIR.")
+        return 2
     try:
         return run(args, Mailer(enabled=not args.no_mail))
     except Abort as e:

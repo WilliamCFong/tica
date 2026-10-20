@@ -5,6 +5,8 @@ import sys
 import argparse
 from datetime import datetime
 
+from btjd import ephemeris_path
+
 
 #Designed in a modular way, so that all the spice stuff is separate from
 #the TICA and WCS stuff.
@@ -17,17 +19,34 @@ from datetime import datetime
 #tes_ephem.txt is getting long!  what is a better option?
 #well, only 200,000 rows so far, and that is 5 years. 17MB, probably this is OK until 2030, at least
 
+DESCRIPTION = """\
+Write or extend tess_ephem.txt with TESS barycentric positions from SPICE.
+
+By default this updates the file the WCS step reads: $TICA_EPHEMERIS if set,
+otherwise the tess_ephem.txt installed with TICA. A file that does not exist
+yet is written from shortly after launch."""
+
+
 def build_parser():
-    parser = argparse.ArgumentParser(
-        prog='tica-dump-ephemeris',
-        description="Write or extend tess_ephem.txt with TESS barycentric positions from SPICE.")
+    parser = argparse.ArgumentParser(prog='tica-dump-ephemeris', description=DESCRIPTION,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
 
     parser.add_argument("--ephemeris", required=True, type=str, nargs='+',
       help="One or more ephemeris files to load into spice")
-    parser.add_argument("--outdir", default="./",type=str,
-      help="directory containing tess_ephem.txt (default: current directory)")
+    out = parser.add_mutually_exclusive_group()
+    out.add_argument("--output", metavar="FILE",
+      help="tess_ephem.txt to write or extend (default: {})".format(ephemeris_path()))
+    out.add_argument("--outdir", type=str,
+      help="write or extend <outdir>/tess_ephem.txt instead")
 
     return parser
+
+
+def output_path(args):
+    """The tess_ephem.txt to write: --outdir, --output, or ephemeris_path()."""
+    if args.outdir is not None:
+        return os.path.join(args.outdir, 'tess_ephem.txt')
+    return args.output or ephemeris_path()
 
 
 tofffin = 577364091.1874759      # Calculated using s.str2et("2018-04-18 22:53:42.001873 UTC"), which is in turn from poctime -t  0 -i SPM3 -o UTC
@@ -58,7 +77,9 @@ def main(argv=None):
     for fn in args.ephemeris:
         s.furnsh(fn)
 
-    outfile = os.path.join(args.outdir,'tess_ephem.txt')
+    outfile = output_path(args)
+    os.makedirs(os.path.dirname(os.path.abspath(outfile)), exist_ok=True)
+    print('updating', outfile)
 
     if not os.path.isfile(outfile):
         t0 = 1250.00080076  #TJD of launch + 23 days, to make spice happy

@@ -116,3 +116,34 @@ def test_fit_wcs_recovers_tess_point_model():
     fit_ras, fit_decs = w.all_pix2world(cols, rows, 1)
     sep = np.hypot((fit_ras - ras) * np.cos(np.radians(decs)), fit_decs - decs) * 3600.0
     assert np.max(sep) < 1.0  # arcsec
+
+
+def test_ephemeris_path_follows_environment(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    import sys
+
+    import btjd
+
+    monkeypatch.delenv("TICA_EPHEMERIS", raising=False)
+    assert btjd.ephemeris_path() == btjd.packaged_ephemeris()
+    ephem = tmp_path / "tess_ephem.txt"
+    shutil.copy(btjd.packaged_ephemeris(), ephem)
+    monkeypatch.setenv("TICA_EPHEMERIS", str(ephem))
+    assert btjd.ephemeris_path() == str(ephem)
+
+    # the WCS fit reads it when the module is imported, as in each step's process
+    out = subprocess.run([sys.executable, "-c",
+                          "import wcs_build.step2_mkwcs as m; print(m.ephemeris_file)"],
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip().splitlines()[-1] == str(ephem)
+
+
+def test_dump_ephemeris_output_path(monkeypatch):
+    from tica.cli import dump_ephemeris
+
+    monkeypatch.setenv("TICA_EPHEMERIS", "/ephem/tess_ephem.txt")
+    parse = dump_ephemeris.build_parser().parse_args
+    assert dump_ephemeris.output_path(parse(["--ephemeris", "k.tm"])) == "/ephem/tess_ephem.txt"
+    assert dump_ephemeris.output_path(parse(["--ephemeris", "k.tm", "--output", "e.txt"])) == "e.txt"
+    assert dump_ephemeris.output_path(parse(["--ephemeris", "k.tm", "--outdir", "d"])) == "d/tess_ephem.txt"

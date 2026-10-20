@@ -80,7 +80,7 @@ def make_site(root, orbits=(204, 205), stems=1):
             "--outputdir", str(Path(root) / "delivery"),
             "--records", str(Path(root) / "records.txt"),
             "--ephemeris-kernel", str(Path(root) / "kernel.tm"),
-            "--ephemeris-outdir", str(Path(root) / "btjd"),
+            "--ephemeris-file", str(Path(root) / "btjd" / "tess_ephem.txt"),
             "--production-table", str(Path(root) / "production_table.md"),
             "--records-copy", str(Path(root) / "repo"),
             "--caldir", str(Path(root) / "cal"), "--ncores", "8", "--ncores-wcs", "2",
@@ -131,6 +131,8 @@ def run_doall(monkeypatch):
         mailer = FakeMailer()
         monkeypatch.setattr(_common, "run_command", steps)
         monkeypatch.setattr(doall_automate, "Mailer", lambda enabled: mailer)
+        # the run exports TICA_EPHEMERIS for its steps; keep that out of other tests
+        monkeypatch.setattr(os, "environ", dict(os.environ))
         return doall_automate.main(argv), steps.calls, mailer.sent
     return run
 
@@ -149,6 +151,9 @@ def test_doall_o1a_success(tmp_path, run_doall):
     assert tso[1][-2:] == ["--fin", "00100724"]
     assert tso[2][-5:] == ["--hlspdir", delivery, "--sector", "98", "--no_diagnostics"]
     args = dict(calls)
+    ephem = str(tmp_path / "btjd" / "tess_ephem.txt")
+    assert args["dump_ephemeris"] == ["--ephemeris", str(tmp_path / "kernel.tm"), "--output", ephem]
+    assert os.environ["TICA_EPHEMERIS"] == ephem
     assert args["wcs_step1_allccd"] == ["--sector", "98", "--dstem", "./", "--reffin", "00100724"]
     assert args["stage_delivery"] == ["v01", delivery, "o1a", "98", "--ref-stars-only"]
     assert args["production_table"] == ["--segments", "o1a", "--wcs1",
@@ -210,3 +215,39 @@ def test_doall_overrides_and_environment(tmp_path, run_doall, monkeypatch):
     tso = dict(calls)["calibrate_tso"]
     assert tso[:6] == ["--o1", "None", "--o2", "206", "--orbseg", "o2a"]
     assert tso[tso.index("--ncores") + 1] == "12"
+
+
+def without_option(argv, name):
+    i = argv.index(name)
+    return argv[:i] + argv[i + 2:]
+
+
+def test_doall_defaults_without_a_checkout(tmp_path, run_doall, monkeypatch, capsys):
+    monkeypatch.setattr(_common, "checkout_root", lambda: None)
+    for name in ("TICA_CALDIR", "TICA_RECORDS_COPY", "TICA_PRODUCTION_TABLE", "TICA_EPHEMERIS"):
+        monkeypatch.delenv(name, raising=False)
+    argv = make_site(tmp_path)
+    for name in ("--production-table", "--records-copy", "--ephemeris-file"):
+        argv = without_option(argv, name)
+
+    # without a checkout there is no default calibration directory
+    rc, calls, _ = run_doall(without_option(argv, "--caldir"))
+    assert (rc, calls) == (2, [])
+    assert "set --caldir or TICA_CALDIR" in capsys.readouterr().out
+
+    rc, calls, _ = run_doall(argv)
+    assert rc == 0
+    args = dict(calls)
+    assert args["dump_ephemeris"] == ["--ephemeris", str(tmp_path / "kernel.tm")]
+    assert args["production_table"][-2:] == ["--output", str(tmp_path / "work" / "production_table.md")]
+    assert not (tmp_path / "repo" / "records.txt").exists()
+
+
+def test_doall_defaults_from_the_checkout(tmp_path, monkeypatch):
+    monkeypatch.setattr(_common, "checkout_root", lambda: str(tmp_path / "tica"))
+    for name in ("TICA_CALDIR", "TICA_RECORDS_COPY", "TICA_PRODUCTION_TABLE"):
+        monkeypatch.delenv(name, raising=False)
+    args = doall_automate.build_parser().parse_args([])
+    assert args.caldir == str(tmp_path / "tica" / "calibration_200sec")
+    assert args.records_copy == str(tmp_path / "tica")
+    assert args.production_table == str(tmp_path / "tica" / "production_table.md")

@@ -21,9 +21,9 @@ from gwcs.coordinate_frames import *
 import glob
 from multiprocessing import Pool
 
+from btjd import ephemeris_path
 from btjd.btjd_correction import btjd_correction
-from importlib.resources import files
-ephemeris_file = files('btjd').joinpath('tess_ephem.txt')
+ephemeris_file = ephemeris_path()
 ephemeris_data = np.genfromtxt(ephemeris_file)
 
 from wcs_build.step1_get_refimg_ctrlpts import gdPRF_calc, idx_filter, ring_background, flux_weighted_centroid
