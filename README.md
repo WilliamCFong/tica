@@ -95,6 +95,8 @@ dvc pull twodbias_<exptime>
 
 where `<exptime>` corresponds to whatever exposure your FFIs are, `30min` for Sectors 1-26, `10min` for Sectors 37-55.
 
+To see which calibration models are present, run `tica-healthcheck` from the top level `tica` directory (or `tica-healthcheck <calibration_dir>` for one directory, or add `--cadence 200sec`). It lists the missing models for each `calibration_<cadence>` directory and prints the `dvc pull` command that fetches them.
+
 You can also pull all of the calibration models if you are at the top level `tica` directory and run
 
 ```

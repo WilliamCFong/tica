@@ -36,6 +36,7 @@ SCRIPTS = [
     "tica-wcs-spoc",
     "tica-stage-delivery",
     "tica-doall-automate",
+    "tica-healthcheck",
 ]
 
 

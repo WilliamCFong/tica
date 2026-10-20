@@ -62,6 +62,7 @@ tica-wcs-step2-allcam-allccd = "tica.cli.wcs_step2_allccd:main"
 tica-wcs-spoc = "tica.cli.wcs_spoc:main"
 tica-stage-delivery = "tica.cli.stage_delivery:main"
 tica-doall-automate = "tica.cli.doall_automate:main"
+tica-healthcheck = "tica.cli.healthcheck:main"
 
 [project.urls]
 Homepage = "https://tessgit.mit.edu/tica/tica"

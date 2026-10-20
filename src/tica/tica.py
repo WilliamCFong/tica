@@ -108,6 +108,34 @@ CALIBRATION_INT_TIMES = (('30min', 1800), ('10min', 600), ('02min', 120),
                          ('20sec', 20), ('200sec', 200))
 
 
+# model files every calibration directory needs: (subdirectory, file name pattern)
+CALIBRATION_MODEL_FILES = (('twodbias', 'cam{}_ccd{}_twoDcorrect.fits'),
+                           ('flatfields', 'cam{}_ccd{}_image.fits'))
+
+
+def calibration_int_time(calibration_dir):
+    """Exposure time in seconds from the _<cadence> suffix of the directory name, or None."""
+    int_time_key = calibration_dir.split('_')[-1]
+    for suffix, int_time in CALIBRATION_INT_TIMES:
+        if suffix in int_time_key:
+            return int_time
+    return None
+
+
+def calibration_model_paths(calibration_dir, subdir):
+    """The 16 model files (one per CCD) expected in calibration_dir/subdir."""
+    name = dict(CALIBRATION_MODEL_FILES)[subdir]
+    return [os.path.join(calibration_dir, subdir, name.format(cam, ccd))
+            for cam in range(1, 5) for ccd in range(1, 5)]
+
+
+def missing_calibration_models(calibration_dir):
+    """Model files missing from calibration_dir, twodbias first."""
+    return [path for subdir, _ in CALIBRATION_MODEL_FILES
+            for path in calibration_model_paths(calibration_dir, subdir)
+            if not os.path.exists(path)]
+
+
 def check_calibration_dir(calibration_dir):
     """Check a calibration directory and return its exposure time in seconds.
 
@@ -123,21 +151,14 @@ def check_calibration_dir(calibration_dir):
     if not os.path.isdir(calibration_dir):
         raise CalibrationError("Calibration directory not found: {}".format(calibration_dir))
 
-    int_time_key = calibration_dir.split('_')[-1]
-    for suffix, int_time in CALIBRATION_INT_TIMES:
-        if suffix in int_time_key:
-            break
-    else:
+    int_time = calibration_int_time(calibration_dir)
+    if int_time is None:
         raise CalibrationError(
             "Cannot tell the exposure time of the calibration models in {}: the directory "
             "name must end in _<cadence>, one of {} (e.g. calibration_200sec).".format(
                 calibration_dir, ', '.join(s for s, _ in CALIBRATION_INT_TIMES)))
 
-    missing = [os.path.join(calibration_dir, sub, name.format(cam, ccd))
-               for sub, name in (('twodbias', 'cam{}_ccd{}_twoDcorrect.fits'),
-                                 ('flatfields', 'cam{}_ccd{}_image.fits'))
-               for cam in range(1, 5) for ccd in range(1, 5)
-               if not os.path.exists(os.path.join(calibration_dir, sub, name.format(cam, ccd)))]
+    missing = missing_calibration_models(calibration_dir)
     if missing:
         raise CalibrationError(
             "{} of 32 calibration model files are missing from {} (were they pulled with "
