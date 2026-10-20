@@ -1,1 +1,0 @@
-../src/wcs_build/step1_get_refimg_ctrlpts.py

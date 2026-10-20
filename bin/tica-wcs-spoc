@@ -61,7 +61,7 @@ for i in 1 2 3 4; do
     for j in 1 2 3 4; do
 	ref_file=$(ls "$dstem"/ref_stars/hlsp_tica_tess_ffi_s*"$SECTOR"-"cam$i"-"ccd$j"_tess_*cat.h5)
 	echo $ref_file
-	step2_mkwcs.py -s ${SECTOR} -ca $i -cd $j -rd "$dstem"/"$ref_file" -if $(ls "$dstem"/tess*-"$i"-"$j"-*) -fd 6 --savediaginfo  -dbg $DEBUGIT --log tica_wcs_step2_spoc.log
+	tica-wcs-step2 -s ${SECTOR} -ca $i -cd $j -rd "$dstem"/"$ref_file" -if $(ls "$dstem"/tess*-"$i"-"$j"-*) -fd 6 --savediaginfo  -dbg $DEBUGIT --log tica_wcs_step2_spoc.log
     done
 done
 

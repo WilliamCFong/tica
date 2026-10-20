@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 import numpy as np
 import spiceypy as s
 import os
@@ -15,17 +14,20 @@ from datetime import datetime
 #
 #writes or appends to tess_ephem.txt.  That file has X,Y,Z, VX,VY, VZ every 15 minutes
 #
-#tes_ephem.txt is getting long!  what is a better option? 
+#tes_ephem.txt is getting long!  what is a better option?
 #well, only 200,000 rows so far, and that is 5 years. 17MB, probably this is OK until 2030, at least
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog='tica-dump-ephemeris',
+        description="Write or extend tess_ephem.txt with TESS barycentric positions from SPICE.")
+
     parser.add_argument("--ephemeris", required=True, type=str, nargs='+',
       help="One or more ephemeris files to load into spice")
-    parser.add_argument("--outdir", default="./",type=str)
+    parser.add_argument("--outdir", default="./",type=str,
+      help="directory containing tess_ephem.txt (default: current directory)")
 
-    return parser.parse_args()
+    return parser
 
 
 tofffin = 577364091.1874759      # Calculated using s.str2et("2018-04-18 22:53:42.001873 UTC"), which is in turn from poctime -t  0 -i SPM3 -o UTC
@@ -36,7 +38,7 @@ def utc2tjd(utc_str):
 
     #astart is in UTC...
     t = s.str2et(utc_str)
-    
+
     #print('raw from spiceypy',t)
     #print('check RAW', t - tofffin , (t - tofffin )/86400.0)
 
@@ -44,11 +46,11 @@ def utc2tjd(utc_str):
     return (t - tofffin )/86400.0 + tofftjd
 
 def tjd2et(time_in):
-    return (time_in - tofftjd)*86400.0  +  tofffin 
+    return (time_in - tofftjd)*86400.0  +  tofffin
 
-    
-def main():
-    args = parse_args()
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
 
     s.kclear()
     s.boddef("TESS",-95)
@@ -74,17 +76,17 @@ def main():
     #spacing is about 15 minutes
     time_in = np.r_[t0:t1:0.010412]
     if len(time_in) < 2:
-        sys.exit()
+        return 0
     t_spiceypy = tjd2et(time_in)
     #t_spiceypy = s.str2et(utc)
 
-    #s.spkezr returns 6-element array of position and velocity 
+    #s.spkezr returns 6-element array of position and velocity
     #and a scalar light travel time
     print(t_spiceypy)
     tess_position = np.array([s.spkezr('TESS', tm, 'J2000', 'NONE', '0')[0] for tm in t_spiceypy ])
 
 
-    
+
     if not os.path.isfile(outfile):
         with open(outfile,'w') as fout:
             for ii,row in enumerate(tess_position):
@@ -93,6 +95,8 @@ def main():
         with open(outfile,'a') as fout:
             for ii,row in enumerate(tess_position):
                 fout.write('{:15.6f} {:15e} {:15e} {:15e} {:8.4f} {:8.4f} {:8.4f}\n'.format(time_in[ii], row[0],row[1],row[2],row[3],row[4],row[5]))
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

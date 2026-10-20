@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Mon Sep 28 14:15:43 2020
@@ -39,10 +38,7 @@ from astropy.modeling import models, fitting
 from astropy import coordinates as coord
 
 import warnings
-import argparse
 
-import tica
-from time import time
 import logging
 
 
@@ -1502,123 +1498,3 @@ def fit_wcs_in_imgdir(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA,
         if DEBUG_LEVEL > 1:
             plt.show()
         plt.close()
- 
-    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--sector", type=int, \
-                        help="TESS Observing Sector Number")
-    parser.add_argument("-ca", "--camera", type=int, choices=range(1,5), \
-                        help="Camera Number [1-4]")
-    parser.add_argument("-cd", "--ccd", type=int, choices=range(1,5), \
-                        help="CCD Number [1-4]")
-    parser.add_argument("-rd", "--refdata", type=argparse.FileType('rb'), \
-                        help="Reference image control point data created in step1")
-    parser.add_argument("-if", "--imgfiles", nargs="*",
-                        help="List of input files.")
-    parser.add_argument("-od", "--outputdir", default='./',
-                        help="Output directory for results.")
-    parser.add_argument("-fd", "--fitdegree", type=int,\
-                        help="Degree of wcs fit")
-    parser.add_argument("--savediaginfo", action="store_true",\
-                        help="Save diagnostic info and figures")
-
-    parser.add_argument("--flexibleapertures", action="store_true", 
-                        help="Allow for centroid analysis region to vary. "
-                        "For most cases pointing is stable (<pixel) "
-                        "in which case do not use this option. "
-                        "This option would be helpful if >1-2 pixel "
-                        "shifts occur.")
-    parser.add_argument("-dbg", "--debug", type=int, default=0,\
-                        help="Debug level; integer higher has more output")
-    parser.add_argument("--parallel", type=int, default=1,
-                        help="run files in parallel on number of processors specified here")
-    parser.add_argument("-l", "--log", metavar="LOG_FILE",
-                        help="save logging output to this file")
-    args = parser.parse_args()
-
-# DEBUG BLOCK for hard coding input parameters and testing
-#     class test_arg:
-#         def __init__(self):
-#             self.sector=29
-#             self.camera=2
-#             self.ccd=1
-# #            self.refdata=open('/pdo/users/cjburke/tica/wcs_build/refout/ref_S29_Orbit66_21.h5','rb')
-# #            self.imgfiles='/pdo/qlp-data/orbit-66/ffi/cam2/ccd1/FITS/*'
-# #            self.outputdir='fitsout/Orbit66/Cam2/Ccd1'
-#             self.refdata=open('/pdo/users/cjburke/tica/wcs_build/refout/refspocunidense_S29_21.h5','rb')
-#             self.imgfiles='/pdo/spoc-data/sector-029/ffis/tess*-2-1-0193-s_ffic.fits.gz'
-#             self.outputdir='fitsout/SpocS29/Cam2/Ccd1'
-#             self.fitdegree=6
-#             self.savediaginfo=True
-#             self.debug=0
-#     args = test_arg()
-
-    SECTOR_WANT = args.sector
-    CAMERA_WANT = args.camera
-    CCD_WANT = args.ccd
-    # argparse opens file handle.  hd5 needs file name not open file handle
-    args.refdata.close()
-    REF_DATA = args.refdata.name
-    IMG_LIST_STR = args.imgfiles
-#    print(IMG_LIST_STR)
-    # We need to remove quotes if they exist in IMG_LIST_STR
-    # Using GNUparallel to run this command I had to add the quotes
-    #  to avoid the files to be expanded on command line
-    #IMG_LIST_STR= IMG_LIST_STR.replace('"','')
-    # output directory is same as input directory
-    outputDir = os.path.dirname(IMG_LIST_STR[0])
-    fitDegree = args.fitdegree
-    if args.flexibleapertures:
-        fixApertures = False
-    else:
-        fixApertures = True
-
-    saveDiag = False
-    if args.savediaginfo:
-        saveDiag = True
-        saveDir = os.path.join(outputDir,'wcs_diags2')
-        if not os.path.isdir(saveDir):
-            os.mkdir(saveDir)
-    DEBUG_LEVEL = args.debug
-
-    #for step 2, we usually do all of the files
-    #so, move the old logs, and make a new file
-    #for every run.
-    if os.path.isfile(args.log):
-        ii = 1
-        while True:
-            if os.path.isfile(args.log + '_run{}'.format(ii) ):
-                ii += 1
-            else:
-                os.rename(args.log, args.log + '_run{}'.format(ii) )
-                break
-                
-    testdir = os.path.dirname(os.path.abspath(args.log))
-    if not os.path.isdir(testdir):
-        os.makedirs(testdir)
-
-    tica.setup_logging(filename=args.log)
-    info_lines = tica.platform_info()
-    for info_line in info_lines:
-        logging.info(info_line)
-    logging.info('python environment:  {}'.format(  os.getenv('CONDA_DEFAULT_ENV') )  )
-    logging.info('program: {}'.format( parser.prog ) )
-    logging.info('argument parameters:')
-    for key in vars(args).keys():
-        if key == 'imgfiles':
-            pass
-        else:
-            logging.info('     {} = {}'.format(key, vars(args)[key]) )
-    starttime = time()
-    
-    fit_wcs_in_imgdir(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_DATA, 
-                      IMG_LIST_STR, outputDir, fitDegree, 
-                      fixApertures,
-                      saveDiag, DEBUG_LEVEL,
-                      n_cores= args.parallel)
-        
-    runtime = time() - starttime
-    logging.info("Runtime: {0:.2f}sec".format(runtime) )
-    #print('Done Sector {0:d} Camera {1:d} CCD: {2:d}'.format(SECTOR_WANT, \
-    #                CAMERA_WANT, CCD_WANT))

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Thu Sep 17 18:49:13 2020
@@ -21,8 +20,6 @@ import h5py
 
 import os
 
-import tica
-from time import time
 import logging
 
 
@@ -34,7 +31,6 @@ from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.time import Time
 from gwcs.wcstools import wcs_from_points
-import argparse
 
 def idx_filter(idx, *array_list):
     new_array_list = []
@@ -356,7 +352,7 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
             print('Could not find nTry: {} targets passing gdPRF (gotN: {})'.format(nTry,gotN))
             logging.error('Something went wrong determining initial pixel position correction on reference image!')
             logging.error('Could not find nTry: {0:d} targets passing gdPRF'.format(nTry))
-            exit()
+            raise SystemExit(1)
         # From these nTry targets calculate the col and row translation from prediction
         corCol = np.median(delCols)
         corRow = np.median(delRows)
@@ -775,88 +771,3 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
             plt.axvline(currow, color='r')
             plt.xlabel('CCD Row Position [px]')
             plt.show()
-    
-    
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-s", "--sector", type=int, \
-                        help="TESS Observing Sector Number")
-    parser.add_argument("-ca", "--camera", type=int, choices=range(1,5), \
-                        help="Camera Number [1-4]")
-    parser.add_argument("-cd", "--ccd", type=int, choices=range(1,5), \
-                        help="CCD Number [1-4]")
-    parser.add_argument("-ri", "--refimage", type=str, \
-                        help="Reference Image FITS Filename With Path")
-    parser.add_argument("-o", "--outputfile", type=argparse.FileType('w'),\
-                        help="Control point data storeage filename with path")
-    parser.add_argument("-dbg", "--debug", type=int, \
-                        help="Debug level; integer higher has more output")
-    parser.add_argument("-w","--wing", type=float, default = 0.9,
-                         help="For a candidate WCS star, this sets a bound on the "
-                         "symmetry of the PSF; the drop in flux from the core to the "
-                        "brighter PSF wing cannot be smaller than this fraction "
-                        "of the drop in flux form the core to the fainter PSF wing.")
-    parser.add_argument("-c","--contrast", type=float, default=3.5,
-                         help = "For candidate WCS star, this sets minimum ratio of the core "
-                         "of the PSF to the maximum in the wings.  Crowded stars will "
-                         "tend to have a smaller ratio.")
-    parser.add_argument("-l", "--log", metavar="LOG_FILE", 
-                        help="save logging output to thiss file")
-
-    
-
-    args = parser.parse_args()
-
-# DEBUG BLOCK for hard coding input parameters and testing
-#     class test_arg:
-#         def __init__(self):
-#             self.sector=28
-#             self.camera=4
-#             self.ccd=4
-# #            self.refimage=open('/pdo/qlp-data/orbit-66/ffi/cam2/ccd2/FITS/tess2020268092527-00126005-2-crm-ffi-ccd2.fits','rb')
-# #            self.outputfile=open('refout/ref_S29_O66_22.h5','w')
-# #            self.refimage=open('/pdo/spoc-data/sector-029/ffis/tess2020241121914-s0029-4-2-0193-s_ffic.fits.gz','rb')
-# #            self.outputfile=open('refout/refspocunidense_S29_42.h5','w')
-#             self.refimage=open('/pdo/spoc-data/sector-028/ffis/tess2020213183915-s0028-4-4-0190-s_ffic.fits.gz','rb')
-#             self.outputfile=open('refout/refspoc_S28_44.h5','w')
-#             self.debug=2
-#     args = test_arg()
-    
-    
-    
-    SECTOR_WANT = args.sector
-    CAMERA_WANT = args.camera
-    CCD_WANT = args.ccd
-    REF_IMAGE = args.refimage
-    
-    # argsparse actually opens a file pointer. Hd5 needs filename not file pointer
-    args.outputfile.close()
-    outputFile = args.outputfile.name
-    DEBUG_LEVEL = args.debug
-
-
-    testdir = os.path.dirname(os.path.abspath(args.log))
-    if not os.path.isdir(testdir):
-        os.makedirs(testdir)
-
-    tica.setup_logging(filename=args.log)    
-    info_lines = tica.platform_info()
-    for info_line in info_lines:
-        logging.info(info_line)
-    logging.info('python environment:  {}'.format(  os.getenv('CONDA_DEFAULT_ENV') )  )
-    logging.info('program: {}'.format( parser.prog ) )
-    logging.info('argument parameters:')
-    for key in vars(args).keys():
-        logging.info('     {} = {}'.format(key, vars(args)[key]) )
-    starttime = time()
-    
-    # Call the main functionality to get
-    #  bright isolated stars on a reference image
-    #  that will be used on all images for a sector camera ccd 
-    #  to determine a wcs solution
-    get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, 
-                       REF_IMAGE, 
-                       outputFile, DEBUG_LEVEL, 
-                       args.wing, args.contrast)
-    runtime = time() - starttime
-    logging.info("Runtime: {0:.2f}sec".format(runtime) )

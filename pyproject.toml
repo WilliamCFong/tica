@@ -48,6 +48,9 @@ tica-ccd-report = "tica.cli.ccd_report:main"
 tica-ffi2ccds = "tica.cli.ffi2ccds:main"
 tica-ccds2ffi = "tica.cli.ccds2ffi:main"
 tica-trim-ccds2ffi = "tica.cli.ccds2ffi:main_trim"
+tica-wcs-step1 = "tica.cli.wcs_step1:main"
+tica-wcs-step2 = "tica.cli.wcs_step2:main"
+tica-dump-ephemeris = "tica.cli.dump_ephemeris:main"
 
 [project.urls]
 Homepage = "https://tessgit.mit.edu/tica/tica"
@@ -64,13 +67,10 @@ script-files = [
     "bin/tica-wcs-step1-allcam-allccd",
     "bin/tica-wcs-step2-allcam-allccd",
     "bin/tica-wcs-spoc",
-    "src/wcs_build/step1_get_refimg_ctrlpts.py",
-    "src/wcs_build/step2_mkwcs.py",
     "bin/tica-check-delivery",
     "bin/tica-stage-delivery",
     "bin/tica-darktime",
     "bin/tica-doall-automate",
-    "src/btjd/tica-dump-ephemeris.py",
 ]
 
 [tool.setuptools.dynamic]

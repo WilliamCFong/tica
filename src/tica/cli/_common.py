@@ -90,11 +90,13 @@ def map_files(worker, items, processes=1, calibration=None):
     return [worker(item) for item in items]
 
 
-def setup_run_logging(prog, args, log, debug=False):
+def setup_run_logging(prog, args, log, debug=False, log_cwd=True, skip=()):
     """Set up logging and record the run configuration.
 
     tica-production-table parses these lines from the logs, so keep the
-    wording unchanged.
+    wording unchanged. It reads the camera and CCD from the "working
+    directory" line, so the WCS steps, which run from the sector directory,
+    leave that line out (log_cwd=False).
     """
     if log is not None:
         logdir = os.path.dirname(os.path.abspath(log))
@@ -104,10 +106,12 @@ def setup_run_logging(prog, args, log, debug=False):
         logger.info(info_line)
     logger.info('python environment:  {}'.format(os.getenv('CONDA_DEFAULT_ENV')))
     logger.info('program: {}'.format(prog))
-    logger.info('working directory {}'.format(os.getcwd()))
+    if log_cwd:
+        logger.info('working directory {}'.format(os.getcwd()))
     logger.info('argument parameters:')
     for key, value in vars(args).items():
-        logger.info('     {} = {}'.format(key, value))
+        if key not in skip:
+            logger.info('     {} = {}'.format(key, value))
 
 
 def run_command(module, args):

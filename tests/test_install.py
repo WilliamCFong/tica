@@ -24,8 +24,9 @@ SCRIPTS = [
     "tica-trim-ccds2ffi",
     "tica-production-table",
     "tica-darktime",
-    "step1_get_refimg_ctrlpts.py",
-    "step2_mkwcs.py",
+    "tica-wcs-step1",
+    "tica-wcs-step2",
+    "tica-dump-ephemeris",
     "tica-calibrate-spoc",
     "tica-wcs-spoc",
 ]
