@@ -69,13 +69,19 @@ done
 #set a flag if there are errors.
 #this lets us processes everything, but make a note of issues
 errorflag=0
+pids=()
 for i in 1 2 3 4; do 
     for j in 1 2 3 4; do
-	step2_mkwcs.py -s ${SECTOR} -ca $i -cd $j -rd "$dstem"/refout/reftica_s$"$SECTOR"_"$i""-$j".h5 -if $(ls "$dstem"/cam"$i"_ccd"$j"/tess*-"$i"-crm-ffi_ccd"$j".cal.fits) -fd 6  -dbg $DEBUGIT --log tica_logs/tica_wcs_step2_cam"$i"_ccd"$j".log  --savediaginfo --parallel $NCORES || {  errorflag=1;  } &
+	step2_mkwcs.py -s ${SECTOR} -ca $i -cd $j -rd "$dstem"/refout/reftica_s$"$SECTOR"_"$i""-$j".h5 -if $(ls "$dstem"/cam"$i"_ccd"$j"/tess*-"$i"-crm-ffi_ccd"$j".cal.fits) -fd 6  -dbg $DEBUGIT --log tica_logs/tica_wcs_step2_cam"$i"_ccd"$j".log  --savediaginfo --parallel $NCORES &
+	pids+=($!)
     done
 done
 
-wait
+#errorflag set inside a background job would not reach this shell,
+#so collect each job's exit status here
+for pid in "${pids[@]}"; do
+    wait "$pid" || errorflag=1
+done
 
 if [[ $errorflag -eq 1 ]]; then
     exit 1

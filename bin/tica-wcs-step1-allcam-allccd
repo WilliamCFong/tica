@@ -77,6 +77,7 @@ DEBUGIT=2
 #set a flag if there are errors.
 #this lets us processes everything, but make a note of issues
 errorflag=0
+pids=()
 for ((iCam = 1 ; iCam <= 4 ; iCam++)); do
     for ((jCcd = 1; jCcd <=4 ; jCcd++)); do
 	USE_REF=$(ls "$dstem""cam$iCam""_ccd$jCcd""/tess"*"$REFFIN"*)
@@ -88,10 +89,15 @@ for ((iCam = 1 ; iCam <= 4 ; iCam++)); do
 	fi
 
 	#assumes setup.py will install step1_get_refimg_ctrlpts.py into path
-	step1_get_refimg_ctrlpts.py -s ${SECTOR} -ca ${iCam} -cd ${jCcd} -ri ${USE_REF} -o ${USE_OUT} -dbg ${DEBUGIT} -l tica_logs/tica_wcs_step1_cam"$iCam"_ccd"$jCcd".log || {  errorflag=1 ; }  &
+	step1_get_refimg_ctrlpts.py -s ${SECTOR} -ca ${iCam} -cd ${jCcd} -ri ${USE_REF} -o ${USE_OUT} -dbg ${DEBUGIT} -l tica_logs/tica_wcs_step1_cam"$iCam"_ccd"$jCcd".log &
+	pids+=($!)
     done
 done
-wait
+#errorflag set inside a background job would not reach this shell,
+#so collect each job's exit status here
+for pid in "${pids[@]}"; do
+    wait "$pid" || errorflag=1
+done
 
 if [[ $errorflag -eq 1 ]]; then
     exit 1
