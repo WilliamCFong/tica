@@ -1,6 +1,7 @@
 import argparse
 import glob
 import os
+import shutil
 import subprocess
 import sys
 
@@ -73,6 +74,9 @@ def build_parser():
     parser.add_argument("--ephemeris-outdir", default=_env("TICA_EPHEMERIS_OUTDIR", "/pdo/users/faus/python/tica/src/btjd/"),
                         help="directory with tess_ephem.txt to update [TICA_EPHEMERIS_OUTDIR] "
                         "(default: %(default)s)")
+    parser.add_argument("--records-copy", default=_env("TICA_RECORDS_COPY", "/pdo/users/faus/python/tica/"),
+                        help="directory to copy the records file to after each run, e.g. the "
+                        "production checkout; empty to skip [TICA_RECORDS_COPY] (default: %(default)s)")
     parser.add_argument("--production-table", default=_env("TICA_PRODUCTION_TABLE", "/pdo/users/faus/python/tica/production_table.md"),
                         help="production table to update [TICA_PRODUCTION_TABLE] (default: %(default)s)")
     parser.add_argument("--mail-start", default=_env("TICA_MAIL_START", DEFAULT_MAIL_START),
@@ -203,8 +207,12 @@ def tidy_segment(workdir, segment):
                 print("mv: cannot stat '{}': No such file or directory".format(os.path.join(ccddir, 'tess*fits')))
             move_into(names, segdir)
             products = ['wcs_diags2', 'rms_list']
+            # tica-darktime writes bad_calibration.txt only for CCDs that have bad cadences
+            if os.path.exists(os.path.join(ccddir, 'bad_calibration.txt')):
+                products.append('bad_calibration.txt')
             if j == 1:
-                products += ['cal_timeseries.txt', 'cal_timeseries.png', 'bad_calibration.txt']
+                # tica-darktime --orbit <segment> names its plot after the segment
+                products += ['cal_timeseries.txt', 'cal_timeseries_{}.png'.format(segment)]
             move_into([os.path.join(ccddir, p) for p in products], segdir)
 
 
@@ -325,6 +333,12 @@ def run(args, mailer):
                     "(This is a first test of automated tica scripts. )".format(SECTOR, segment, delivery))
         with open(args.records, 'a') as f:
             f.write(checkstr + ' error\n')
+
+    if args.records_copy:
+        try:
+            shutil.copy(args.records, args.records_copy)
+        except OSError as e:
+            print("could not copy {} to {}: {}".format(args.records, args.records_copy, e))
     return 0
 
 

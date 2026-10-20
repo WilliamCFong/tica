@@ -74,7 +74,7 @@ def make_site(root, orbits=(204, 205), stems=1):
                 for cam in range(1, 5):
                     (d / "tess202500{}000000-{:08d}-{}-crm-ffi.fits".format(s + 1, orbit * 1000 + 10 * s + fin, cam)).touch()
         os.utime(poc / "orbit-{}".format(orbit), (1000 + k, 1000 + k))
-    for d in ("work", "delivery", "btjd"):
+    for d in ("work", "delivery", "btjd", "repo"):
         (Path(root) / d).mkdir()
     return ["--dstem", str(poc), "--workdir", str(Path(root) / "work"),
             "--outputdir", str(Path(root) / "delivery"),
@@ -82,6 +82,7 @@ def make_site(root, orbits=(204, 205), stems=1):
             "--ephemeris-kernel", str(Path(root) / "kernel.tm"),
             "--ephemeris-outdir", str(Path(root) / "btjd"),
             "--production-table", str(Path(root) / "production_table.md"),
+            "--records-copy", str(Path(root) / "repo"),
             "--caldir", str(Path(root) / "cal"), "--ncores", "8", "--ncores-wcs", "2",
             "--mail-start", "start@x", "--mail-success", "ok@x,ok2@x", "--mail-error", "err@x"]
 
@@ -105,9 +106,12 @@ class FakeSteps:
                     (d / "tess2025001000000-00100724-{}-crm-ffi_ccd{}.cal.fits".format(i, j)).touch()
                 (cwd / "cam{}_ccd1".format(i) / "cal_timeseries.txt").touch()
         elif module == "darktime":
+            orbit = args[args.index("--orbit") + 1]
             for i in range(1, 5):
                 for j in range(1, 5):
                     (cwd / "cam{}_ccd{}".format(i, j) / "rms_list").touch()
+                (cwd / "cam{}_ccd1".format(i) / "cal_timeseries_{}.png".format(orbit)).touch()
+            (cwd / "cam2_ccd3" / "bad_calibration.txt").touch()
             if "--save_reffin" in args:
                 (cwd / "reffin.txt").write_text("cam1_ccd1 00100724\ncam1_ccd2 00100725\n")
         elif module == "wcs_step2_allccd":
@@ -145,7 +149,10 @@ def test_doall_o1a_success(tmp_path, run_doall):
     assert (tmp_path / "records.txt").read_text() == "98 205 o1a 3 3 3 3 tess2025001000000 finished\n"
     seg = tmp_path / "work" / "sector98" / "cam2_ccd1" / "o1a"
     assert sorted(p.name for p in seg.iterdir()) == [
-        "cal_timeseries.txt", "rms_list", "tess2025001000000-00100724-2-crm-ffi_ccd1.cal.fits", "wcs_diags2"]
+        "cal_timeseries.txt", "cal_timeseries_o1a.png", "rms_list",
+        "tess2025001000000-00100724-2-crm-ffi_ccd1.cal.fits", "wcs_diags2"]
+    assert (tmp_path / "work" / "sector98" / "cam2_ccd3" / "o1a" / "bad_calibration.txt").exists()
+    assert (tmp_path / "repo" / "records.txt").read_text() == (tmp_path / "records.txt").read_text()
 
 
 
@@ -164,6 +171,7 @@ def test_doall_o1b_error_records_and_mails(tmp_path, run_doall):
     assert mails[-1][1] == "err@x"
     assert "there were errors" in mails[-1][2]
     assert (tmp_path / "records.txt").read_text() == "98 205 o1b 6 6 6 6 tess2025002000000 error\n"
+    assert (tmp_path / "repo" / "records.txt").read_text() == (tmp_path / "records.txt").read_text()
 
 
 @pytest.mark.parametrize("rc_step, rc_exit", [(2, 2), (137, 3)])
