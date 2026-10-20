@@ -1,12 +1,16 @@
 .git
-.dvc
+.dvc/cache
+.dvc/tmp
+.venv
 *.pyc
 __pycache__
 *.egg-info
 dist/
 build/
 .pytest_cache/
+data/
 calibration_models/
 reg_test/input/
 reg_test/output_checks/
 reg_test/ref_stars/
+production_table.md

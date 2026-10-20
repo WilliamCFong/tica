@@ -24,39 +24,61 @@ If you have questions or are having trouble, feel free to contact the project ow
 
 
 ## Installation
+
 ### 1. Environment and Codebase
 
-TICA requires python version 3.11 or higher.  Using a virtual environment for the TICA installation is considered best practice.  With the `conda` environment manager, you can choose the python version for a given environment:
+TICA is distributed as a git repository, because the calibration models are tracked alongside the code (see below). Start by cloning it:
+
 ```
-conda create -n tica_env python=3.11
-conda activate tica_env
+git clone https://github.com/mmfausnaugh/tica.git
+cd tica
 ```
 
-If you have python 3.11 or higher, you can instead use `virtualenv` or a similar environment manager.
+#### Docker (recommended)
 
-Next, you will need to clone the TICA repository to get the calibration models, so you should install from here:
+The supported way to run TICA is in a Docker container. The image is built from hash-pinned lock files (`requirements.lock`, `requirements-dev.lock`), so every installation of a given TICA version gets exactly the same Python and package versions. This matters for reproducibility: calibrated outputs and WCS headers can change slightly with different versions of `numpy`, `astropy`, etc.
 
-  ```
-  git clone https://github.com/mmfausnaugh/tica.git
-  cd tica
-  pip install -e .
-  ```
+You need [Docker](https://docs.docker.com/get-docker/) with the Compose plugin and `make`. Then:
 
-Instead, you can  add the `tica` repository to you `PYTHONPATH` environment variable and `tica/bin` to your `PATH`.
-
-See the `requirements.txt` file for a list of required packages.  Besides typical scientific computing packages (`numpy`, `scipy`, `matplotlib`, and `astropy`), TICA requires `gwcs` (https://github.com/spacetelescope/gwcs) and `tess-point` (https://github.com/christopherburke/tess-point).  The `pyproject.toml` file should install any missing packages.  
-
-<!--- You can also copy the TICA HLSP production environment with the `tica/environment.yml` file
 ```
-conda env create -n tica_env -f environment.yml
+make build       # runtime image, tagged tica:<VERSION>
+make build-dev   # development image with pytest, ruff, and DVC, tagged tica-dev:<VERSION>
+make test        # installation smoke tests
 ```
---->
+
+Run TICA on your data with the `tica` service. The repository is mounted read-only at `/tica` (so the calibration directories are available as `/tica/calibration_<exptime>`), and the directory given by `TICA_DATA` (default `./data`) is mounted at `/data`:
+
+```
+export TICA_DATA=/path/to/my/ffis    # contains raw/ with the *ffir*.fits files
+docker compose run --rm tica tica-calibrate-spoc input_dir=/data/raw CALDIR=/tica/calibration_10min
+```
+
+The makefile sets `TICA_UID`/`TICA_GID` to your user so that output files are owned by you. If you call `docker compose` directly, export them yourself (`export TICA_UID=$(id -u) TICA_GID=$(id -g) TICA_VERSION=$(cat VERSION)`).
+
+`make shell` opens a shell in the development image with your checkout mounted at `/app`, installed in editable mode, so code changes take effect without rebuilding.
+
+To update dependencies, edit `pyproject.toml` and run `make lock`, then rebuild and rerun the tests and the regression test before committing the new lock files.
+
+#### pip
+
+TICA can also be installed into a Python 3.11+ virtual environment. Installing from the clone in editable mode keeps the scripts next to the calibration models:
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+```
+
+This resolves the newest compatible dependency versions rather than the pinned ones. To reproduce the Docker environment exactly, use Python 3.12 and run `pip install --require-hashes --no-deps -r requirements.lock` before `pip install --no-deps -e .`.
+
+Besides typical scientific computing packages (`numpy`, `scipy`, `matplotlib`, `h5py`, and `astropy`), TICA requires `gwcs` (https://github.com/spacetelescope/gwcs), `tess-point` (https://github.com/christopherburke/tess-point), and `spiceypy`; see `pyproject.toml`.
 
 ### 2. Calibration Models
 
 2D-bias and flatfield calibration models are distributed by an application called [DVC](https://www.dvc.org) (Data Version Control).  DVC uses metadata files in the TICA git repository to track different versions of the calibration models.  The calibration models are stored on a server at MIT, which DVC pulls with https requests.
 
-To retrieve the calibration models, first install DVC using the directions on [the DVC website](https://dvc.org/doc/install).  You can use the website's downloadable script, or you can use `conda`, `pip`, or `homebrew` on macOS.
+To retrieve the calibration models, use DVC. It is included in the development image, so you can run the commands below inside `make shell` (or prefix them with `docker compose run --rm dev`). For a pip installation, run `pip install -e ".[data]"` or install DVC using the directions on [the DVC website](https://dvc.org/doc/install).
 <!---If you use `pip`, note that you need to install additional libraries necessary for Gdrive access:
 ```
 pip install dvc
@@ -119,6 +141,8 @@ cd ../reg_test
 dvc pull input output_checks ref_stars
 python run_reg_test.py
 ```
+
+With Docker, pull the data from `make shell` and then run `make reg-test`.
 
 `run_reg_test.py` will take SPOC `*ffir*` files in `reg_test/input` and apply calibrations and WCSs.  The results of those calibrations are checked against the contents of `reg_test/output_checks`.  
 

@@ -30,13 +30,15 @@ dependencies = [
     "matplotlib>=3.5",
     "h5py>=3.6",
     "tess-point>=0.8.0",
-    "gwcs>=0.15.0,<0.19",
+    "gwcs>=1.0",
     "psycopg2-binary>=2.9",
     "spiceypy>=6.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0", "pytest-cov", "ruff", "pre-commit"]
+# DVC fetches calibration models and regression-test data
+data = ["dvc>=3.0"]
 
 [project.urls]
 Homepage = "https://tessgit.mit.edu/tica/tica"
@@ -73,6 +75,9 @@ version = {file = "VERSION"}
 
 [tool.setuptools.package-data]
 btjd = ["tess_ephem.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100

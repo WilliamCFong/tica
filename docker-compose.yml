@@ -1,16 +1,35 @@
-services:
-  tica:
-    build: .
-    volumes:
-      - .:/app
-      - ./calibration_models:/app/calibration_models:ro
-    working_dir: /app
-    command: bash
+# Set TICA_UID/TICA_GID (e.g. `export TICA_UID=$(id -u) TICA_GID=$(id -g)`) so
+# files written to mounted directories are owned by you rather than root.
+x-user: &user "${TICA_UID:-0}:${TICA_GID:-0}"
 
+services:
+  # Run TICA on data in $TICA_DATA (default ./data), e.g.
+  #   docker compose run --rm tica tica-calibrate-spoc input_dir=/data/raw CALDIR=/tica/calibration_10min
+  tica:
+    image: tica:${TICA_VERSION:-latest}
+    pull_policy: build
+    build:
+      context: .
+      target: runtime
+      args:
+        TICA_VERSION: ${TICA_VERSION:-latest}
+    user: *user
+    volumes:
+      # Read-only checkout so the calibration_* symlinks into calibration_models resolve
+      - .:/tica:ro
+      - ${TICA_DATA:-./data}:/data
+    working_dir: /data
+
+  # Development shell on the live checkout, with tests, lint, and DVC, e.g.
+  #   docker compose run --rm dev pytest
+  #   docker compose run --rm dev dvc pull calibration_models/twodbias_10min.dvc
   dev:
-    build: .
+    image: tica-dev:${TICA_VERSION:-latest}
+    pull_policy: build
+    build:
+      context: .
+      target: dev
+    user: *user
     volumes:
       - .:/app
-      - ./calibration_models:/app/calibration_models:ro
     working_dir: /app
-    command: pip install -e ".[dev]" && bash

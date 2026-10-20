@@ -26,8 +26,9 @@ from multiprocessing import Pool
 DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, os.path.join( DIR,'..'))
 from btjd.btjd_correction import btjd_correction
-ephemeris_file = os.path.join( DIR,'../btjd/tess_ephem.txt')
-ephemeris_data = np.genfromtxt(os.path.join(ephemeris_file))
+from importlib.resources import files
+ephemeris_file = files('btjd').joinpath('tess_ephem.txt')
+ephemeris_data = np.genfromtxt(ephemeris_file)
 
 from wcs_build.step1_get_refimg_ctrlpts import gdPRF_calc, idx_filter, ring_background, flux_weighted_centroid
 
@@ -245,7 +246,7 @@ def fit_wcs(ras, decs, cols, rows, tmags, \
     xy = (sclObsCols, sclObsRows)
     radec = (ras, decs)
 
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
     cx = gwcs_obj.forward_transform[1]
     # polynomial fit object in y (row)
     cy = gwcs_obj.forward_transform[2]
@@ -291,7 +292,7 @@ def fit_wcs(ras, decs, cols, rows, tmags, \
     # refit with clipped data
     xy = (sclObsCols[idxgd], sclObsRows[idxgd])
     radec = (ras[idxgd], decs[idxgd])
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
     cx = gwcs_obj.forward_transform[1]
     # polynomial fit object in y (row)
     cy = gwcs_obj.forward_transform[2]
@@ -307,7 +308,7 @@ def fit_wcs(ras, decs, cols, rows, tmags, \
     raproj = newrefra
     decproj = newrefdec
     proj_point = SkyCoord(raproj, decproj, frame = 'icrs', unit=(u.deg, u.deg))
-    gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+    gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
 
     # We have the wcs in polynomial form
     # now we need to convert it to SIP form
@@ -955,7 +956,7 @@ def worker( intuple):
                 # Determine background from 2 pixel ring around box
                 bkgLev = ring_background(sciImgCal)
                 #centOut = cent.centroid_com(sciImgCal-bkgLev)
-                centOut = flux_weighted_centroid(sciImgCal-bkgLev)
+                centOut = flux_weighted_centroid(sciImgCal - sciImgCal.dtype.type(bkgLev))
                 # centroid_com produces 0-based coordinates
                 newCol = centOut[0]+colX[0]
                 newRow = centOut[1]+rowY[0]
@@ -1008,7 +1009,7 @@ def worker( intuple):
                 # analysis region around target
                 sciImgCal = hdulistCal[0].data[midRow-blkHlfCent-1: midRow+blkHlfCent, midCol-blkHlfCent-1: midCol+blkHlfCent]
                 #centOut = cent.centroid_com(sciImgCal-bkgLev)
-                centOut = flux_weighted_centroid(sciImgCal-bkgLev)
+                centOut = flux_weighted_centroid(sciImgCal - sciImgCal.dtype.type(bkgLev))
  
  
                 # Once in blue moon centroids go nutsy check for it

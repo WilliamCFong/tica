@@ -36,10 +36,7 @@ import datetime
 
 from .GainModel import GainModel
 from .LinearityModels import LinearityModel, SpocLinearity_Updated
-
-fstem = os.path.abspath(os.path.dirname(__file__) + '/../')
-with open(os.path.join(fstem, 'VERSION'),'r') as infile:
-    version = infile.read().strip()
+from . import version
 
 
 # these are functions for fast manipulation of images

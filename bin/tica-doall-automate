@@ -133,16 +133,15 @@ errorflag=0
 #setup control for cron
 checkstr=$(echo $SECTOR $orbit $segment $countcam1 $countcam2 $countcam3 $countcam4 $stem )
 compstr=$(grep "$orbit $segment" /data/tess/image_sub/tica-processing-records.txt)
-#echo $compstr
-#echo $checkstr
-#echo "grep exit code" $?
+grepstatus=$?
 
 
 echo $compstr
 echo $checkstr
 
-if [[ $? == "0" ]]; then
-    if [[ $compstr =~ $checkstr ]]; then
+if [[ $grepstatus == "0" ]]; then
+    #literal substring match; checkstr is not a regex
+    if [[ $compstr == *"$checkstr"* ]]; then
 	#echo "grep successful, matched checkstr, do not run"
 	exit 0
     fi
@@ -169,15 +168,17 @@ echo "Running tica-calibrate-tso..."
 if [[ $mod -eq 1 ]]; then
     tica-calibrate-tso o1="$orbit" o2="None" orbseg="$segment" dstem="$dstem" \
 	CALDIR="$CALDIR" NCORES="$NCORES" || {  
-	if [[ $? == 2 ]]; then
+	rc=$?
+	if [[ $rc == 2 ]]; then
 	    echo "Configuration error running tica-calibrate-tso, exiting.";
 	    ExitWithEmail "Configuration error running tica-calibrate-tso, $SECTOR $orbit $segment, exting....";
 	    exit 2
-	elif [[ $? == 1 ]]; then
+	elif [[ $rc == 1 ]]; then
 	    echo "Error in tica-calibrate-tso, continuing fo"
 	    errorflag=1;
 	else
-	    echo "Unknown  error, abort!"
+	    echo "Unknown error (exit code $rc), abort!"
+	    ExitWithEmail "Unknown error (exit code $rc), $SECTOR $orbit $segment, aborting....";
 	    exit 3
 	fi
 	
@@ -186,15 +187,17 @@ if [[ $mod -eq 1 ]]; then
 elif [[ $mod -eq 0 ]]; then
     tica-calibrate-tso o1="None" o2="$orbit" orbseg="$segment" dstem="$dstem" \
 	CALDIR="$CALDIR" NCORES="$NCORES" || {  
-	if [[ $? == 2 ]]; then
+	rc=$?
+	if [[ $rc == 2 ]]; then
             echo "Configuration error running tica-calibrate-tso, exiting.";
             ExitWithEmail "Configuration error running tica-calibrate-tso, $SECTOR $orbit $segment, exting....";
             exit 2
-        elif [[ $? == 1 ]]; then
+        elif [[ $rc == 1 ]]; then
             echo "Error in tica-calibration-tso, continuing fo"
             errorflag=1;
 	else
-	    echo "Unknown  error, abort!"
+	    echo "Unknown error (exit code $rc), abort!"
+	    ExitWithEmail "Unknown error (exit code $rc), $SECTOR $orbit $segment, aborting....";
 	    exit 3
         fi
 
@@ -212,15 +215,17 @@ fi
 if [[ $segment =~ "o1a" ]]; then
     echo "Running tica-wcs-step1-allcam-allccd..."
     tica-wcs-step1-allcam-allccd SECTOR="$SECTOR" dstem="./" REFFIN="$reffin" ||{
-	if [[ $? == 2 ]]; then
+	rc=$?
+	if [[ $rc == 2 ]]; then
             echo "Configuration error running tica-wcs-step1-allcam-allccd, exiting.";
             ExitWithEmail "Configuration error running tica-wcs-step1-allcam-allccd, $SECTOR $orbit $segment, exting....";
             exit 2
-	elif [[ $? == 1 ]]; then
+	elif [[ $rc == 1 ]]; then
             echo "Error in tica-wcs-step1-allcam-allccd, continuing forward"
             errorflag=1;
 	else
-	    echo "Unknown  error, abort!"
+	    echo "Unknown error (exit code $rc), abort!"
+	    ExitWithEmail "Unknown error (exit code $rc), $SECTOR $orbit $segment, aborting....";
 	    exit 3
 	fi
     }
@@ -230,15 +235,17 @@ fi
 
 echo "Running tica-wcs-step2-allcam-allccd..."
 tica-wcs-step2-allcam-allccd SECTOR="$SECTOR" dstem="./" NCORES="$NCORES2" ||{  
-    if [[ $? == 2 ]]; then
+    rc=$?
+    if [[ $rc == 2 ]]; then
         echo "Configuration error running tica-wcs-step2-allcam-allccd, exiting.";
         ExitWithEmail "Configuration error running tica-wcs-step2-allcam-allccd, $SECTOR $orbit $segment, exting....";
         exit 2
-    elif [[ $? == 1 ]]; then
-        echo "Error in tica-wcs-step1-allcam-allccd, continuing forward"
+    elif [[ $rc == 1 ]]; then
+        echo "Error in tica-wcs-step2-allcam-allccd, continuing forward"
         errorflag=1;
     else
-        echo "Unknown  error, abort!"
+        echo "Unknown error (exit code $rc), abort!"
+        ExitWithEmail "Unknown error (exit code $rc), $SECTOR $orbit $segment, aborting....";
         exit 3
     fi
 

@@ -109,7 +109,7 @@ if __name__ == '__main__':
     
             xy = (sclObsCols, sclObsRows)
             radec = (ras, decs)
-            gwcs_obj = wcs_from_points(xy, radec, proj_point, degree=fitDegree)
+            gwcs_obj = wcs_from_points(xy, SkyCoord(*radec, frame='icrs', unit=(u.deg, u.deg)), proj_point, poly_degree=fitDegree)
             # Look for outliers to trim
             gwcs_pred_ras, gwcs_pred_decs = gwcs_obj(sclObsCols, sclObsRows)
             deg2Rad = np.pi/180.0
