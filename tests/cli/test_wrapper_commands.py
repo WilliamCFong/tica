@@ -40,6 +40,15 @@ def recorder(monkeypatch):
     return rec
 
 
+def make_caldir(path):
+    """A calibration directory with (empty) model files for all 16 CCDs."""
+    for sub, name in (("twodbias", "cam{}_ccd{}_twoDcorrect.fits"), ("flatfields", "cam{}_ccd{}_image.fits")):
+        (Path(path) / sub).mkdir(parents=True)
+        for cam in range(1, 5):
+            for ccd in range(1, 5):
+                (Path(path) / sub / name.format(cam, ccd)).touch()
+
+
 def make_poc(root, orbit=205, stamps=("2025001000000", "2025002000000")):
     d = Path(root) / "poc" / "orbit-{}".format(orbit) / "ffi_fits"
     d.mkdir(parents=True)
@@ -47,7 +56,7 @@ def make_poc(root, orbit=205, stamps=("2025001000000", "2025002000000")):
         for fin in range(2):
             for cam in range(1, 5):
                 (d / "tess{}-{:08d}-{}-crm-ffi.fits".format(stamp, orbit * 1000 + 10 * s + fin, cam)).touch()
-    (Path(root) / "cal_200sec").mkdir()
+    make_caldir(Path(root) / "cal_200sec")
 
 
 @pytest.mark.parametrize("orbseg, stamp", [("o1a", "2025001000000"), ("o1b", "2025002000000")])
@@ -116,17 +125,18 @@ def test_calibrate_spoc_lists_ffir_files(tmp_path, monkeypatch, recorder):
     for cam, ccd in [(1, 1), (4, 3)]:
         (raw / "tess2021041025908-s0035-{}-{}-0205-s_ffir.fits.gz".format(cam, ccd)).touch()
     (raw / "tess2021041025908-s0035-1-1-0205-s_ffic.fits.gz").touch()
+    make_caldir(tmp_path / "cal_10min")
     work = tmp_path / "work"
     work.mkdir()
     (work / "inlist").write_text("left-over-from-an-earlier-run.fits\n")
     monkeypatch.chdir(work)
 
-    assert calibrate_spoc.main(["--input-dir", "../raw", "--caldir", "../cal", "--ncores", "3"]) == 0
+    assert calibrate_spoc.main(["--input-dir", "../raw", "--caldir", "../cal_10min", "--ncores", "3"]) == 0
 
     inlist = (work / "inlist").read_text().split()
     assert [os.path.basename(f) for f in inlist] == [
         "tess2021041025908-s0035-1-1-0205-s_ffir.fits.gz", "tess2021041025908-s0035-4-3-0205-s_ffir.fits.gz"]
-    assert recorder.calls == [("cal_ccd2ccd", ["inlist", "--outdir", ".", "--caldir", "../cal",
+    assert recorder.calls == [("cal_ccd2ccd", ["inlist", "--outdir", ".", "--caldir", "../cal_10min",
                                                "--log", "../tica.log", "--parallel", "3"], str(work))]
 
 
@@ -272,3 +282,31 @@ def test_calibrate_tso_segment_with_tess_in_path(tmp_path, monkeypatch, recorder
                                "--caldir", "cal_200sec"]) == 0
     inlist = (site / "cam1_ccd1" / "inlist").read_text().split()
     assert len(inlist) == 2 and all("tess2025002000000" in f for f in inlist)
+
+
+@pytest.mark.parametrize("caldir, problem", [
+    ("models", "must end in _<cadence>"),                     # the name from the TSO test run
+    ("missing_200sec", "not found"),
+    ("partial_200sec", "16 of 32 calibration model files are missing"),
+])
+def test_calibrate_tso_rejects_bad_caldir(tmp_path, monkeypatch, recorder, capsys, caldir, problem):
+    make_poc(tmp_path)
+    make_caldir(tmp_path / "models")
+    make_caldir(tmp_path / "partial_200sec")
+    for f in (tmp_path / "partial_200sec" / "flatfields").iterdir():
+        f.unlink()
+    monkeypatch.chdir(tmp_path)
+
+    rc = calibrate_tso.main(["--o1", "205", "--o2", "None", "--orbseg", "o1a", "--dstem", "poc",
+                             "--caldir", caldir])
+
+    assert rc == 2
+    assert recorder.calls == []
+    assert problem in capsys.readouterr().out
+
+
+def test_calibrate_spoc_rejects_bad_caldir(tmp_path, monkeypatch, recorder):
+    make_caldir(tmp_path / "tica-calibration-models")
+    monkeypatch.chdir(tmp_path)
+    assert calibrate_spoc.main(["--input-dir", ".", "--caldir", "tica-calibration-models"]) == 2
+    assert recorder.calls == []

@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tica-production-table` raised `IndexError` instead of printing its mismatch warnings.
 - `tica-darktime` no longer blocks on a plot window at the end (use `--show`).
 - `tica-overclock-stats` works and is installed.
+- Calibration directories are checked before use. A directory whose name doesn't end in a known cadence (`_30min`, `_10min`, `_02min`, `_20sec`, `_200sec`), or that is missing any of the 32 model files, raises `CalibrationError` naming the problem; the commands report it and exit 2 (configuration error). Before, a misnamed directory failed later with `AttributeError: 'Calibration' object has no attribute 'int_time'` (reported once per camera, as exit 1), and a missing model failed with a `TypeError` mid-calibration. `tica-calibrate-tso` and `tica-calibrate-spoc` check `--caldir` before doing any work.
+- CCDs created without calibration models no longer build a placeholder `Calibration` pointing at a nonexistent `calibration/` directory; calibrating one raises `CalibrationError`.
 - `tica-calibrate-tso` lists `ffi_fits-haho` files when no `--orbseg` is given (a brace typo meant it never did), and no longer misreads segment stamps when a parent directory contains "tess".
 - `tica-wcs-spoc` works with any `--dstem`, not just `.`; matches star lists by zero-padded sector; only fits calibrated FFIs; and exits 1 when a CCD fails.
 - `tica-calibrate-spoc` rewrites `inlist` instead of appending to it, so reruns don't list every FFI twice.

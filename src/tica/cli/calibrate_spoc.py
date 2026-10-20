@@ -34,6 +34,11 @@ def build_parser():
 def main(argv=None):
     args = build_parser().parse_args(argv)
 
+    error = _common.caldir_error(args.caldir)
+    if error:
+        print("Configuration Error. {}".format(error))
+        return 2
+
     input_dir_use = os.path.realpath(args.input_dir)
     #make in list for tica, replacing any list from an earlier run
     with open('inlist', 'w') as fout:

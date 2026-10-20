@@ -66,12 +66,23 @@ def read_file_list(path):
         raise SystemExit(1)
 
 
+def caldir_error(caldir):
+    """Why caldir is not a usable calibration directory, or None if it is."""
+    from tica.tica import CalibrationError, check_calibration_dir
+    try:
+        check_calibration_dir(caldir)
+    except CalibrationError as e:
+        return str(e)
+    return None
+
+
 def load_calibration(caldir):
-    """Load calibration models, or exit 1 if no directory was given."""
-    if not caldir:
-        logger.error("No calibration dir specified.  You must choose"
-                     "calibration models appropriate for the exposure time")
-        raise SystemExit(1)
+    """Load calibration models, or exit 2 (configuration error) if caldir is not usable."""
+    error = caldir_error(caldir)
+    if error:
+        logger.error(error)
+        print("Configuration Error. {}".format(error), file=sys.stderr)
+        raise SystemExit(2)
     from tica.tica import Calibration
     return Calibration(calibration_dir=caldir)
 
