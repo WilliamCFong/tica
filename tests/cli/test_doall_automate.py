@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tica.cli import _common, doall_automate
+from tica.cli import _common, _segments, doall_automate
 
 
 @pytest.mark.parametrize("orbit, sector", [(9, 1), (100, 46), (203, 97), (204, 97), (205, 98),
@@ -87,6 +87,15 @@ def make_site(root, orbits=(204, 205), stems=1):
             "--mail-start", "start@x", "--mail-success", "ok@x,ok2@x", "--mail-error", "err@x"]
 
 
+def make_ref_stars(root, sector=98):
+    """The o1a reference star lists that later segments need."""
+    refout = Path(root) / "work" / "sector{}".format(sector) / "refout"
+    refout.mkdir(parents=True, exist_ok=True)
+    for i in range(1, 5):
+        for j in range(1, 5):
+            (refout / "reftica_s{}_{}-{}.h5".format(sector, i, j)).touch()
+
+
 class FakeSteps:
     """Stands in for _common.run_command and leaves the files each step would."""
 
@@ -121,16 +130,20 @@ class FakeSteps:
             (cwd / "cam2_ccd3" / "bad_calibration.txt").touch()
             if "--save_reffin" in args:
                 (cwd / "reffin.txt").write_text("cam1_ccd1 00100724\ncam1_ccd2 00100725\n")
+        elif module == "wcs_step1_allccd":
+            make_ref_stars(cwd.parent.parent, int(args[args.index("--sector") + 1]))
         return self.rcs.get(module, 0)
 
 
 @pytest.fixture
 def run_doall(monkeypatch):
-    def run(argv, rcs=None):
+    def run(argv, rcs=None, cadence=200.0):
         steps = FakeSteps(rcs)
         mailer = FakeMailer()
         monkeypatch.setattr(_common, "run_command", steps)
         monkeypatch.setattr(doall_automate, "Mailer", lambda enabled: mailer)
+        # the fake FFIs are empty: 200 s cadences
+        monkeypatch.setattr(_segments, "cadence_seconds", lambda path: cadence)
         # the run exports TICA_EPHEMERIS for its steps; keep that out of other tests
         monkeypatch.setattr(os, "environ", dict(os.environ))
         return doall_automate.main(argv), steps.calls, mailer.sent
@@ -178,7 +191,10 @@ def test_doall_skips_recorded_segment(tmp_path, run_doall):
 
 
 def test_doall_o1b_error_records_and_mails(tmp_path, run_doall):
-    rc, calls, mails = run_doall(make_site(tmp_path, stems=2), rcs={"calibrate_tso": 1})
+    argv = make_site(tmp_path, stems=2)
+    make_ref_stars(tmp_path)
+    (tmp_path / "records.txt").write_text("98 205 o1a 3 3 3 3 tess2025001000000 finished\n")
+    rc, calls, mails = run_doall(argv, rcs={"calibrate_tso": 1})
 
     assert rc == 0
     assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime", "stage_delivery",
@@ -188,7 +204,8 @@ def test_doall_o1b_error_records_and_mails(tmp_path, run_doall):
     assert "production_table" not in [m for m, _ in calls]
     assert mails[-1][1] == "err@x"
     assert "there were errors" in mails[-1][2]
-    assert (tmp_path / "records.txt").read_text() == "98 205 o1b 6 6 6 6 tess2025002000000 error\n"
+    assert (tmp_path / "records.txt").read_text().splitlines()[-1] == \
+        "98 205 o1b 3 3 3 3 tess2025002000000 error"
     assert (tmp_path / "repo" / "records.txt").read_text() == (tmp_path / "records.txt").read_text()
 
 
@@ -207,9 +224,11 @@ def test_doall_off_nominal_downlink(tmp_path, run_doall):
 
 
 def test_doall_overrides_and_environment(tmp_path, run_doall, monkeypatch):
-    argv = make_site(tmp_path)
+    # orbit 206 is not the newest directory, and its segment comes from its own files
+    argv = make_site(tmp_path, orbits=(204, 206, 205))
     argv = argv[:argv.index("--ncores")] + argv[argv.index("--ncores") + 2:]
     monkeypatch.setenv("TICA_NCORES", "12")
+    make_ref_stars(tmp_path)
     rc, calls, _ = run_doall(argv + ["--orbit", "206", "--segment", "o2a"])
     assert rc == 0
     tso = dict(calls)["calibrate_tso"]
@@ -251,3 +270,75 @@ def test_doall_defaults_from_the_checkout(tmp_path, monkeypatch):
     assert args.caldir == str(tmp_path / "tica" / "calibration_200sec")
     assert args.records_copy == str(tmp_path / "tica")
     assert args.production_table == str(tmp_path / "tica" / "production_table.md")
+
+
+def test_doall_later_segment_needs_o1a_star_lists(tmp_path, run_doall, capsys):
+    argv = make_site(tmp_path, stems=2)
+    refout = tmp_path / "work" / "sector98" / "refout"
+    refout.mkdir(parents=True)
+    for k in range(15):
+        (refout / "reftica_s98_{}-{}.h5".format(k // 4 + 1, k % 4 + 1)).touch()
+
+    (tmp_path / "records.txt").write_text("98 205 o1a 3 3 3 3 tess2025001000000 finished\n")
+    rc, calls, mails = run_doall(argv)
+
+    assert rc == 2
+    assert [m for m, _ in calls] == ["dump_ephemeris"]
+    out = capsys.readouterr().out
+    assert "1 of the 16 are missing" in out and "reftica_s98_4-4.h5" in out
+    assert "Process that segment first" in out
+
+
+def test_doall_records_must_be_a_file(tmp_path, run_doall, capsys):
+    argv = make_site(tmp_path)
+    argv[argv.index("--records") + 1] = str(tmp_path)
+    rc, calls, _ = run_doall(argv)
+    assert (rc, calls) == (2, [])
+    assert "is a directory" in capsys.readouterr().out
+
+
+def test_doall_orbit_with_both_halves_runs_them_in_order(tmp_path, run_doall):
+    argv = make_site(tmp_path, orbits=(205, 206), stems=1)
+    # orbit 205 is not the newest; it has both halves, neither processed yet
+    orbit = tmp_path / "poc" / "orbit-205" / "ffi_fits"
+    for fin in range(3):
+        for cam in range(1, 5):
+            (orbit / "tess2025002000000-{:08d}-{}-crm-ffi.fits".format(205010 + fin, cam)).touch()
+
+    rc, calls, mails = run_doall(argv + ["--orbit", "205"])
+
+    assert rc == 0
+    modules = [m for m, _ in calls]
+    assert modules.count("dump_ephemeris") == 1
+    segments = [a[a.index("--orbseg") + 1] for m, a in calls if m == "calibrate_tso"]
+    assert segments == ["o1a", "o1a", "o1a", "o1b"]
+    assert (tmp_path / "records.txt").read_text().splitlines() == [
+        "98 205 o1a 3 3 3 3 tess2025001000000 finished",
+        "98 205 o1b 3 3 3 3 tess2025002000000 finished"]
+    assert [m[1] for m in mails] == ["start@x", "ok@x,ok2@x", "start@x", "ok@x,ok2@x"]
+
+    # rerunning finds both recorded
+    assert run_doall(argv + ["--orbit", "205"])[1] == []
+
+
+def test_doall_unknown_segment(tmp_path, run_doall, capsys):
+    rc, calls, _ = run_doall(make_site(tmp_path) + ["--segment", "o1b"])
+    assert (rc, calls) == (2, [])
+    assert "Orbit 205 has no segment o1b; its FFIs make o1a" in capsys.readouterr().out
+
+
+def test_doall_whole_orbit(tmp_path, run_doall):
+    # an older orbit downlinked in one piece: 600 s cadences spanning ~12.7 days
+    argv = make_site(tmp_path, orbits=(205,))
+    orbit = tmp_path / "poc" / "orbit-205" / "ffi_fits"
+    for cam in range(1, 5):
+        (orbit / "tess2025001000000-00206829-{}-crm-ffi.fits".format(cam)).touch()
+    rc, calls, mails = run_doall(argv, cadence=600.0)
+
+    assert rc == 0
+    tso = [a for m, a in calls if m == "calibrate_tso"]
+    assert len(tso) == 3 and all(a[a.index("--orbseg") + 1] == "o1" for a in tso)
+    assert "wcs_step1_allccd" in [m for m, _ in calls]
+    assert dict(calls)["production_table"][:3] == ["--segments", "o1", "--wcs1"]
+    assert (tmp_path / "records.txt").read_text().splitlines()[-1] == \
+        "98 205 o1 4 4 4 4 tess2025001000000 finished"

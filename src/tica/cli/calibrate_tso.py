@@ -3,7 +3,7 @@ import os
 import shutil
 import sys
 
-from tica.cli import _common
+from tica.cli import _common, _segments
 
 DESCRIPTION = """\
 Calibrate full-camera FFIs from the TESS Science Office (TSO) / POC with
@@ -18,6 +18,12 @@ Outputs go to <outdir> (default: the current directory): calibrated FFIs in
 cam<i>_ccd<j>/ and logs in tica_logs/. Run later steps (tica-darktime,
 tica-wcs-step1-allcam-allccd, tica-wcs-step2-allcam-allccd) from inside that
 directory.
+
+--orbseg selects one segment of the orbit: o1a/o1b (o2a/o2b, ...) for the
+halves of an orbit downlinked in two parts, or o1 (o2, ...) for an orbit
+downlinked whole. Segments are worked out from the files' cadences, and a
+re-delivered downlink replaces the earlier copy (see tica.cli._segments).
+Without --orbseg, every file of the orbit is used, including ffi_fits-haho.
 
 Other modes, used by tica-doall-automate to write each FFI only once:
   --no_write   record cal_timeseries.txt and the log, but write no FFIs
@@ -94,13 +100,12 @@ def check_config(o1, o2, orbseg):
     return None
 
 
-def segment_stamps(files):
-    """The distinct date stamps (tess<stamp>-...) in the file names, sorted."""
-    return sorted({os.path.basename(f)[len('tess'):].split('-')[0] for f in files})
-
-
 def orbit_files(dstem, orbit, cam, orbseg, slash='//'):
-    """Raw FFIs of one camera in one orbit, or None if orbseg names a missing segment."""
+    """Raw FFIs of one camera in one orbit, or None if the orbit has no segment orbseg.
+
+    Raises _segments.OffNominal if the orbit's FFIs don't fall into one or two
+    downlinks.
+    """
     files = []
     if orbseg == '':
         if os.path.isdir('{}//orbit-{}/ffi_fits-haho'.format(dstem, orbit)):
@@ -108,16 +113,8 @@ def orbit_files(dstem, orbit, cam, orbseg, slash='//'):
         files += _common.sorted_glob('{}{}orbit-{}/ffi_fits/tess*-{}-crm-ffi.fits*'.format(dstem, slash, orbit, cam))
         return files
 
-    ##check orbit segments
-    stamps = segment_stamps(_common.sorted_glob('{}//orbit-{}/ffi_fits/tess*-{}-crm-ffi.fits*'.format(dstem, orbit, cam)))
-    stampuse = ''
-    if 'a' in orbseg and len(stamps) > 0:
-        stampuse = stamps[0]
-    if 'b' in orbseg:
-        stampuse = stamps[1] if len(stamps) > 1 else ''
-    if stampuse == '':
-        return None
-    return _common.sorted_glob('{}//orbit-{}/ffi_fits/tess{}*-{}-crm-ffi.fits*'.format(dstem, orbit, stampuse, cam))
+    segment = _segments.find_segment(dstem, orbit, orbseg)
+    return None if segment is None else segment.files.get(cam, [])
 
 
 def log_name(o1, o2, orbseg):
@@ -169,10 +166,16 @@ def main(argv=None):
         for orbit, name, slash in ((o1, 'o1', '//'), (o2, 'o2', '/')):
             if orbit == "None":
                 continue
-            found = orbit_files(dstem, orbit, i, orbseg, slash=slash)
+            try:
+                found = orbit_files(dstem, orbit, i, orbseg, slash=slash)
+            except _segments.OffNominal as e:
+                print("Configuration Error. {}".format(e))
+                return 2
             if found is None:
+                names = [seg.name for seg in _segments.find_segments(dstem, orbit)]
                 print("Error.  Requested {} but could not find correct segment in "
-                      "{}/orbit-{}/ffi_fits.".format(orbseg, dstem, orbit))
+                      "{}/orbit-{}/ffi_fits; it has {}.".format(orbseg, dstem, orbit,
+                                                               ', '.join(names) or 'no FFIs'))
                 return 2
             files += found
         if args.fin is not None:
@@ -187,7 +190,11 @@ def main(argv=None):
     if args.fin is not None:
         logfile = logfile.replace('_tica.log', '_tica_reference.log')
 
+    # the keyword is empty for a whole orbit (see _segments); tica-cal-ffi2hlsp
+    # also needs the segment name for the file names, and works this out itself
+    keyword = orbseg if orbseg.endswith(('a', 'b')) else ''
     if args.hlspdir is not None:
+        keyword = orbseg
         module = 'cal_ffi2hlsp'
         options = ['--hlspdir', os.path.abspath(args.hlspdir), '--sector', args.sector,
                    '--refdir', os.path.join(outdir, 'refout'), '--workdir', outdir,
@@ -209,7 +216,7 @@ def main(argv=None):
         rc = _common.run_command(module,
                                  ['inlist', '--outdir', '.', '--caldir', caldir,
                                   '--parallel', args.ncores, '--log', logfile,
-                                  '--orb_seg', orbseg] + options,
+                                  '--orb_seg', keyword] + options,
                                  cwd=camdir)
         if rc == 2:
             # a configuration error, e.g. missing reference star lists

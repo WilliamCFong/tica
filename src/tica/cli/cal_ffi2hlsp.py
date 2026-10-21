@@ -78,8 +78,9 @@ def worker(in_tuple):
     calibration, wcs_params = get_calibration()
     logger = logging.getLogger(__name__)
 
-    im = FFI_File(filename, calibration=calibration, outdir=None,
-                  orbit_segment=args.orb_seg)
+    # whole orbits get an empty ORB_SEG, as tica-calibrate-tso always wrote
+    keyword = args.orb_seg if args.orb_seg.endswith(('a', 'b')) else ''
+    im = FFI_File(filename, calibration=calibration, outdir=None, orbit_segment=keyword)
     fin = os.path.basename(filename).split('-')[1]
 
     wcs_results = []
@@ -129,8 +130,9 @@ def build_parser():
                         help="delivery directory for the sector, e.g. <delivery root>/s0098")
     parser.add_argument("--sector", required=True, type=int, help="sector number")
     parser.add_argument("--orb_seg", required=True,
-                        help="orbit segment (o1a, o1b, o2a, ...), written to the ORB_SEG keyword "
-                        "and used for the orbit in the file names")
+                        help="orbit segment: o1a, o1b, o2a, ... for half orbits, or o1, o2, ... for "
+                        "an orbit downlinked whole. Written to the ORB_SEG keyword (empty for a "
+                        "whole orbit) and used for the orbit in the file names")
     parser.add_argument("--refdir", required=True, metavar="DIRECTORY",
                         help="directory with the reftica_s<sector>_<i>-<j>.h5 star lists")
     parser.add_argument("--workdir", default='..', metavar="DIRECTORY",

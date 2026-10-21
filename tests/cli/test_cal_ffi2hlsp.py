@@ -152,3 +152,17 @@ def test_missing_reference_stars_exit_2(site, tmp_path, capsys):
     assert rc == 2
     assert "reftica_s35_2-1.h5" in capsys.readouterr().err
     assert not (tmp_path / "s0035").exists()
+
+
+def test_whole_orbit_has_empty_orb_seg(site, tmp_path):
+    root, inlist, refdir = site
+    one = tmp_path / "inlist"
+    one.write_text(inlist.read_text().splitlines()[0] + "\n")
+    rc = cal_ffi2hlsp.main([str(one), "--outdir", str(tmp_path), "--caldir", str(CALDIR_10MIN),
+                            "--orb_seg", "o1", "--hlspdir", str(tmp_path / "s0035"), "--sector", "35",
+                            "--refdir", str(refdir), "--workdir", str(tmp_path),
+                            "--log", str(tmp_path / "tica_logs" / "o1_tica.log")])
+    assert rc == 0
+    path = (tmp_path / "s0035" / "cam2-ccd3"
+            / "hlsp_tica_tess_ffi_s0035-o1-{:08d}-cam2-ccd3_tess_v01_img.fits".format(FINS[0]))
+    assert fits.getheader(path)["ORB_SEG"] == ""
