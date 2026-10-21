@@ -122,12 +122,12 @@ def get_from_logs(infile):
                 py_env_working =  py_env_reg.group(1)
 
             if 'sector = ' in fline:
-                wcs_sector_reg = re.search(r'sector = (\d\d)',fline)
+                wcs_sector_reg = re.search(r'sector = (\d+)',fline)
                 wcs_sector_working =  wcs_sector_reg.group(1)
 
 
             if 'working directory' in fline:
-                sector_reg = re.search(r'/sector(\d\d)/',fline)
+                sector_reg = re.search(r'/sector(\d+)/',fline)
 
                 cam_reg = re.search(r'/cam(\d)_ccd(\d)',fline)
                 cam = cam_reg.group(1)

@@ -83,8 +83,9 @@ def make_sector(root, segment="o1a", sector=98):
     return sdir
 
 
-def test_production_table_appends_one_row_per_ccd(tmp_path, monkeypatch):
-    sdir = make_sector(tmp_path)
+@pytest.mark.parametrize("sector", [98, 108])      # 108: the first 3-digit sector
+def test_production_table_appends_one_row_per_ccd(tmp_path, monkeypatch, sector):
+    sdir = make_sector(tmp_path, sector=sector)
     table = tmp_path / "production_table.md"
     monkeypatch.chdir(sdir)
 
@@ -94,7 +95,7 @@ def test_production_table_appends_one_row_per_ccd(tmp_path, monkeypatch):
     lines = table.read_text().splitlines()
     assert len(lines) == 2 + 16 + 16          # header, alignment, two runs of 16 CCDs
     first = [c.strip() for c in lines[2].split("|")]
-    assert first[1:4] == ["0098", "o1a", "2026.10.20-01:00:00"]
+    assert first[1:4] == ["{:04d}".format(sector), "o1a", "2026.10.20-01:00:00"]
     assert first[4] == "2026.10.20-06:16:00"     # latest end time over all logs
     assert "00100724" in lines[2]                 # reference FFI from step 1
 

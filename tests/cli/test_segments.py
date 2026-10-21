@@ -95,3 +95,33 @@ def test_no_ffis(tmp_path, cadence):
     (tmp_path / "orbit-232" / "ffi_fits").mkdir(parents=True)
     assert _segments.find_segments(tmp_path, 232) == []
     assert _segments.find_segments(tmp_path, 233) == []
+
+
+def test_halves_end_at_different_cadences_per_camera(tmp_path, cadence):
+    # orbit 227: camera 1's first half runs 52 cadences past cameras 2-4's, so
+    # the second half starts earlier for cameras 2-4 than camera 1's first half ends
+    orbit = tmp_path / "orbit-227"
+    for stamp in ("2026257171426", "2026258102559"):
+        touch_ffis(orbit, stamp, range(1323443, 1325895), cams=(1,))
+        touch_ffis(orbit, stamp, range(1323443, 1325843), cams=(2, 3, 4))
+    touch_ffis(orbit, "2026264010337", range(1325895, 1329285), cams=(1,))
+    touch_ffis(orbit, "2026264010337", range(1325843, 1329285), cams=(2, 3, 4))
+
+    a, b = _segments.find_segments(tmp_path, 227)
+
+    assert (a.name, b.name) == ("o1a", "o1b")
+    assert a.counts() == [2452, 2400, 2400, 2400]
+    assert b.counts() == [3390, 3442, 3442, 3442]
+    assert b.stamps == ("2026264010337",)
+
+
+def test_small_overlap_between_halves_stays_split(tmp_path, cadence):
+    orbit = tmp_path / "orbit-229"
+    touch_ffis(orbit, "2026280000000", range(100, 150))
+    touch_ffis(orbit, "2026287000000", range(148, 200))      # repeats 2 cadences
+
+    a, b = _segments.find_segments(tmp_path, 229)
+
+    assert (a.name, b.name) == ("o1a", "o1b")
+    assert a.counts() == [50] * 4 and b.counts() == [50] * 4  # shared cadences stay in o1a
+    assert all(int(Path(f).name.split("-")[1]) >= 150 for f in b.files[1])

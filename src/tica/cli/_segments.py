@@ -6,9 +6,11 @@ was processed and <fin> is the cadence number (the CADENCE keyword, one per
 FFI). Nothing in the files names the orbit segment, so it is worked out from
 the cadences:
 
-- Stamps whose cadence ranges overlap are one downlink delivered more than
-  once. Where several stamps have the same cadence and camera, the file with
-  the latest stamp is used.
+- A stamp that mostly repeats the FFIs (cadence and camera) of another is
+  the same downlink delivered again. Where several stamps have the same
+  cadence and camera, the file with the latest stamp is used. Overlap is
+  counted per camera, since each camera's halves can end at a different
+  cadence (orbit 227: camera 1 at 1325894, cameras 2-4 at 1325842).
 - Two downlinks are the orbit's halves, o<k>a and o<k>b, in cadence order.
   Most orbits since sector 56 are downlinked this way.
 - One downlink is either the first half, before the second has arrived, or a
@@ -31,6 +33,8 @@ from astropy.io import fits
 
 # a TESS orbit is ~13.7 days; a half is ~7
 WHOLE_ORBIT_DAYS = 10.0
+# share of FFIs two stamps must have in common to be one downlink delivered twice
+REDELIVERY_SHARE = 0.5
 
 FILE_NAME = re.compile(r'tess(\d+)-(\d+)-(\d)-crm-ffi\.fits')
 
@@ -87,22 +91,36 @@ class Segment:
 
 
 def downlinks(paths):
-    """Group FFI files into downlinks: lists of (stamp, fin, cam, path), in cadence order."""
+    """Group FFI files into downlinks: lists of (stamp, fin, cam, path), in cadence order.
+
+    A stamp is a re-delivery of an earlier downlink when at least
+    REDELIVERY_SHARE of its FFIs (cadence and camera) are already in it, or of
+    the downlink's FFIs are in the stamp. Overlap is counted per camera: each
+    camera's halves can end at a different cadence. A cadence in two separate
+    downlinks is kept only in the earlier one.
+    """
     by_stamp = {}
     for path in paths:
         parsed = parse_name(path)
         if parsed is not None:
             by_stamp.setdefault(parsed[0], []).append(parsed + (path,))
-    ranges = sorted((min(e[1] for e in entries), max(e[1] for e in entries), stamp)
-                    for stamp, entries in by_stamp.items())
     groups = []
-    for first, last, stamp in ranges:
-        if groups and first <= groups[-1]['last']:
-            groups[-1]['stamps'].append(stamp)
-            groups[-1]['last'] = max(groups[-1]['last'], last)
+    for stamp in sorted(by_stamp, key=lambda st: (min(e[1] for e in by_stamp[st]), st)):
+        entries = by_stamp[stamp]
+        keys = {(e[1], e[2]) for e in entries}
+        for group in groups:
+            shared = len(keys & group['keys'])
+            if shared >= REDELIVERY_SHARE * min(len(keys), len(group['keys'])):
+                group['keys'] |= keys
+                group['entries'] += entries
+                break
         else:
-            groups.append({'first': first, 'last': last, 'stamps': [stamp]})
-    return [[e for stamp in g['stamps'] for e in by_stamp[stamp]] for g in groups]
+            groups.append({'keys': set(keys), 'entries': list(entries)})
+    out, seen = [], set()
+    for group in groups:
+        out.append([e for e in group['entries'] if (e[1], e[2]) not in seen])
+        seen |= group['keys']
+    return out
 
 
 def latest_files(entries):
