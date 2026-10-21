@@ -41,7 +41,8 @@ the libpq service named by TICA_TIC_SERVICE (default: tic). The defaults are the
 settings.
 
 Exit codes: 0 done or nothing to do; 1 off-nominal downlink or no FFIs, not processed;
-2 a step reported a configuration error; 3 a step failed unexpectedly."""
+2 a step reported a configuration error; 3 a step failed unexpectedly, or WCS
+step 1 made no star list for some CCDs (recorded as an error; nothing delivered)."""
 
 # exit codes of the step commands
 STEP_OK, STEP_ERROR, STEP_CONFIG_ERROR = 0, 1, 2
@@ -78,6 +79,9 @@ def build_parser():
     parser.add_argument("--segment", help="process only this segment of the orbit (e.g. o1a, or o1 for "
                         "an orbit downlinked whole). Segments after the sector's first need its "
                         "reference star lists in <workdir>/sector<S>/refout/")
+    parser.add_argument("--reffin", metavar="FIN",
+                        help="WCS reference frame (FIN, e.g. 01324500) for the sector's first segment, "
+                        "instead of the one tica-darktime picks")
     parser.add_argument("--caldir", default=_env("TICA_CALDIR", checkout_path("calibration_200sec")),
                         help="calibration models [TICA_CALDIR] (default: calibration_200sec in "
                         "the TICA checkout this runs from: %(default)s)")
@@ -284,6 +288,11 @@ def run(args, mailer):
     if not segments:
         print("No FFIs found in {}.".format(os.path.join(dstem, 'orbit-{}'.format(orbit), 'ffi_fits')))
         return 1
+    if args.reffin is not None:
+        if not args.reffin.isdigit():
+            print("Configuration Error. --reffin {} is not a FIN.".format(args.reffin))
+            return 2
+        args.reffin = '{:08d}'.format(int(args.reffin))
     if args.segment is not None:
         names = [seg.name for seg in segments]
         segments = [seg for seg in segments if seg.name == args.segment]
@@ -363,16 +372,41 @@ def process_segment(args, mailer, orbit, SECTOR, seg, checkstr):
         print("Running tica-darktime...")
         _common.run_command('darktime', ['--save_reflist', '--save_reffin', '--use_first_ccd',
                                          '--orbit', segment], cwd=workdir)
-        reffin = read_reffin(workdir)
+        reffin = args.reffin or read_reffin(workdir)
+        if not reffin:
+            message = ("TICA s{} {}: tica-darktime found no WCS reference frame that is well "
+                       "calibrated on all 16 CCDs; see {}/cam<i>_ccd1/cal_timeseries_{}.png. Pick "
+                       "one by hand with --reffin. Nothing was delivered.").format(
+                           SECTOR, segment, workdir, segment)
+            print(message)
+            mailer.send("tica proceessing error", args.mail_error, message)
+            write_record(args, checkstr, 'error')
+            return 3
+        if args.reffin:
+            print("Using --reffin {} instead of tica-darktime's choice.".format(args.reffin))
 
         print("Running tica-calibrate-tso --fin {}...".format(reffin))
         rc = _common.run_command('calibrate_tso', calibrate + ['--fin', reffin], cwd=workdir)
         errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
 
         print("Running tica-wcs-step1-allcam-allccd...")
+        # remake every star list, so all come from this reference frame
         rc = _common.run_command('wcs_step1_allccd', ['--sector', SECTOR, '--dstem', './',
-                                                      '--reffin', reffin], cwd=workdir)
+                                                      '--reffin', reffin, '--overwrite'], cwd=workdir)
         errorflag |= check_step(rc, 'tica-wcs-step1-allcam-allccd', args, mailer, where)
+        missing = missing_ref_stars(workdir, SECTOR)
+        if missing:
+            # no FFI of these CCDs can be fitted, and later segments need them too;
+            # keep the reference frames to look at
+            ccds = [os.path.basename(m)[len('reftica_s{}_'.format(SECTOR)):-len('.h5')] for m in missing]
+            message = ("TICA s{} {}: WCS step 1 made no reference star list for {} CCDs ({}), with "
+                       "reference FIN {}. See {}/tica_logs/tica_wcs_step1_cam<i>_ccd<j>.log; the "
+                       "reference frames are kept in {}/cam<i>_ccd<j>/. Nothing was delivered.").format(
+                           SECTOR, segment, len(missing), ', '.join(ccds), reffin, workdir, workdir)
+            print(message)
+            mailer.send("tica proceessing error", args.mail_error, message)
+            write_record(args, checkstr, 'error')
+            return 3
         remove_reference_frames(workdir)
 
         print("Running tica-calibrate-tso --hlspdir...")
@@ -403,8 +437,7 @@ def process_segment(args, mailer, orbit, SECTOR, seg, checkstr):
         mailer.send("tica s{} {} proceessing".format(SECTOR, segment), args.mail_success,
                     "TICA s{} {} processing complete with no errors. Data can be retrieved at {}".format(
                         SECTOR, segment, delivery))
-        with open(args.records, 'a') as f:
-            f.write(checkstr + ' finished\n')
+        write_record(args, checkstr, 'finished')
         table_args = ['--segments', segment] + (['--wcs1'] if seg.first_of_sector else [])
         table = args.production_table or os.path.join(args.workdir, 'production_table.md')
         _common.run_command('production_table', table_args + ['--output', table], cwd=workdir)
@@ -412,15 +445,19 @@ def process_segment(args, mailer, orbit, SECTOR, seg, checkstr):
         mailer.send("tica s{} {} proceessing".format(SECTOR, segment), args.mail_error,
                     "TICA s{} {} processing complete, but there were errors. Look in {} "
                     "(This is a first test of automated tica scripts. )".format(SECTOR, segment, delivery))
-        with open(args.records, 'a') as f:
-            f.write(checkstr + ' error\n')
+        write_record(args, checkstr, 'error')
+    return 0
 
+
+def write_record(args, checkstr, status):
+    """Append a records line, and copy the records to --records-copy."""
+    with open(args.records, 'a') as f:
+        f.write('{} {}\n'.format(checkstr, status))
     if args.records_copy:
         try:
             shutil.copy(args.records, args.records_copy)
         except OSError as e:
             print("could not copy {} to {}: {}".format(args.records, args.records_copy, e))
-    return 0
 
 
 

@@ -295,6 +295,20 @@ def test_wcs_step1_allccd_skips_existing_and_reports_failures(tmp_path, monkeypa
                                "--catalog", "postgres", "--tic-service", "tic"]
 
 
+def test_wcs_step1_allccd_overwrite_remakes_existing(tmp_path, monkeypatch):
+    s = make_sector(tmp_path)
+    rec = Recorder()
+    monkeypatch.setattr(_common, "run_parallel", rec.run_parallel)
+    monkeypatch.chdir(s)
+
+    assert wcs_step1_allccd.main(["--sector", "98", "--dstem", "./", "--reffin", "00100724"]) == 0
+    assert rec.calls == []                       # all 16 exist
+    assert wcs_step1_allccd.main(["--sector", "98", "--dstem", "./", "--reffin", "00100724",
+                                  "--overwrite"]) == 0
+    assert len(rec.calls) == 16
+    assert list((s / "refout").glob("*.h5")) == []    # removed, for step 1 to remake
+
+
 def test_wcs_step1_allccd_passes_catalog_options(tmp_path, monkeypatch):
     s = make_sector(tmp_path)
     os.remove(s / "refout" / "reftica_s98_1-1.h5")

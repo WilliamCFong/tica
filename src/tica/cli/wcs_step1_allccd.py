@@ -13,7 +13,8 @@ tica-wcs-step1 identifies bright and relatively uncrowded stars in a reference
 FFI and writes .h5 files tabulating good stars for the WCS fit, which
 tica-wcs-step2-allcam-allccd needs. The .h5 files go to <dstem>/refout/; CCDs
 whose .h5 file already exists are skipped. Logs go to
-tica_logs/tica_wcs_step1_cam<i>_ccd<j>.log in the current directory.
+tica_logs/tica_wcs_step1_cam<i>_ccd<j>.log in the current directory. With
+--overwrite, existing .h5 files are remade instead of skipped.
 
 This command assumes TSO format FFIs and naming conventions (see
 tica-calibrate-tso), in <dstem>cam<i>_ccd<j>/. TSO format files are not
@@ -41,6 +42,8 @@ def build_parser():
     parser.add_argument("--tic-service", default=default_service(),
                         help="libpq service for --catalog postgres [TICA_TIC_SERVICE] "
                         "(default: %(default)s)")
+    parser.add_argument("--overwrite", action="store_true",
+                        help="remake star lists that already exist, e.g. for a new reference image")
     return parser
 
 
@@ -63,8 +66,10 @@ def main(argv=None):
             USE_OUT = '{}refout/reftica_s{}_{}-{}.h5'.format(dstem, args.sector, iCam, jCcd)
 
             if os.path.exists(USE_OUT):
-                print("skipping {}; already exists".format(USE_OUT))
-                continue
+                if not args.overwrite:
+                    print("skipping {}; already exists".format(USE_OUT))
+                    continue
+                os.remove(USE_OUT)
 
             jobs.append(('wcs_step1',
                          ['-s', args.sector, '-ca', iCam, '-cd', jCcd, '-ri'] + USE_REF

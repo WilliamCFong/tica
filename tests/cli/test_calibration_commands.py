@@ -147,6 +147,7 @@ def test_cal_ffi2ccds_splits_and_records_diagnostics(tmp_path):
     assert hdr["ORB_SEG"] == "o1a"
     rows = (outdir / "cal_timeseries.txt").read_text().splitlines()
     assert rows[0].split()[:2] == ["name", "mode_ccd1"]
+    assert rows[0].split()[-1] == "straylight" and rows[1].split()[-1] == "0"
     assert [r.split()[0] for r in rows[1:]] == [f.name for f in sorted(raw)]
     log = (tmp_path / "logs" / "o1a_tica.log").read_text()
     assert log.splitlines()[0].split()[2:4] == ["TICA", "version:"]

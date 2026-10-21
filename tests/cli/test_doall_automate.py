@@ -132,6 +132,10 @@ class FakeSteps:
                 (cwd / "reffin.txt").write_text("cam1_ccd1 00100724\ncam1_ccd2 00100725\n")
         elif module == "wcs_step1_allccd":
             make_ref_stars(cwd.parent.parent, int(args[args.index("--sector") + 1]))
+            if self.rcs.get(module, 0):
+                # a failed step 1: cameras 1 and 2 got no star list
+                for f in (cwd / "refout").glob("reftica_s*_[12]-*.h5"):
+                    f.unlink()
         return self.rcs.get(module, 0)
 
 
@@ -167,7 +171,8 @@ def test_doall_o1a_success(tmp_path, run_doall):
     ephem = str(tmp_path / "btjd" / "tess_ephem.txt")
     assert args["dump_ephemeris"] == ["--ephemeris", str(tmp_path / "kernel.tm"), "--output", ephem]
     assert os.environ["TICA_EPHEMERIS"] == ephem
-    assert args["wcs_step1_allccd"] == ["--sector", "98", "--dstem", "./", "--reffin", "00100724"]
+    assert args["wcs_step1_allccd"] == ["--sector", "98", "--dstem", "./", "--reffin", "00100724",
+                                        "--overwrite"]
     assert args["stage_delivery"] == ["v01", delivery, "o1a", "98", "--ref-stars-only"]
     assert args["production_table"] == ["--segments", "o1a", "--wcs1",
                                         "--output", str(tmp_path / "production_table.md")]
@@ -342,3 +347,36 @@ def test_doall_whole_orbit(tmp_path, run_doall):
     assert dict(calls)["production_table"][:3] == ["--segments", "o1", "--wcs1"]
     assert (tmp_path / "records.txt").read_text().splitlines()[-1] == \
         "98 205 o1 4 4 4 4 tess2025001000000 finished"
+
+
+def test_doall_stops_when_step1_makes_no_star_lists(tmp_path, run_doall):
+    rc, calls, mails = run_doall(make_site(tmp_path), rcs={"wcs_step1_allccd": 1})
+
+    assert rc == 3
+    assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime", "calibrate_tso",
+                                     "wcs_step1_allccd"]
+    subject, recipients, message = mails[-1]
+    assert (subject, recipients) == ("tica proceessing error", "err@x")
+    assert "for 8 CCDs (1-1, 1-2, 1-3, 1-4, 2-1, 2-2, 2-3, 2-4)" in message
+    assert "reference FIN 00100724" in message
+    assert (tmp_path / "records.txt").read_text() == "98 205 o1a 3 3 3 3 tess2025001000000 error\n"
+    # the reference frames are kept to look at
+    assert len(list((tmp_path / "work" / "sector98").glob("cam*_ccd*/tess*fits"))) == 16
+
+
+def test_doall_reffin_override(tmp_path, run_doall):
+    rc, calls, _ = run_doall(make_site(tmp_path) + ["--reffin", "100800"])
+    assert rc == 0
+    args = dict(calls)
+    assert args["wcs_step1_allccd"][args["wcs_step1_allccd"].index("--reffin") + 1] == "00100800"
+    fin_run = [a for m, a in calls if m == "calibrate_tso"][1]
+    assert fin_run[-2:] == ["--fin", "00100800"]
+
+
+def test_doall_stops_without_a_reference_frame(tmp_path, run_doall, monkeypatch):
+    monkeypatch.setattr(doall_automate, "read_reffin", lambda workdir: "")
+    rc, calls, mails = run_doall(make_site(tmp_path))
+    assert rc == 3
+    assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime"]
+    assert "Pick one by hand with --reffin" in mails[-1][2]
+    assert (tmp_path / "records.txt").read_text().endswith(" error\n")
