@@ -52,6 +52,11 @@ def orbit_label(orbit):
     return "o1" if orbit % 2 == 1 else "o2"
 
 
+def orb_seg_keyword(name):
+    """The ORB_SEG keyword for a segment: its name, or '' for a whole orbit."""
+    return name if name.endswith(('a', 'b')) else ''
+
+
 def parse_name(path):
     """(stamp, fin, camera) from a POC FFI file name, or None for other files."""
     m = FILE_NAME.match(os.path.basename(path))
@@ -73,12 +78,12 @@ class Segment:
 
     @property
     def whole_orbit(self):
-        return not self.name.endswith(('a', 'b'))
+        return orb_seg_keyword(self.name) == ''
 
     @property
     def orb_seg_keyword(self):
         """The ORB_SEG keyword value: the segment, or '' for a whole orbit."""
-        return '' if self.whole_orbit else self.name
+        return orb_seg_keyword(self.name)
 
     @property
     def first_of_sector(self):

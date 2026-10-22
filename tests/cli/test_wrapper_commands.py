@@ -189,6 +189,10 @@ def test_calibrate_tso_whole_orbit(tmp_path, monkeypatch, recorder):
     args = recorder.calls[0][1]
     assert recorder.calls[0][0] == "cal_ffi2hlsp" and args[args.index("--orb_seg") + 1] == "o1"
 
+    recorder.calls.clear()
+    assert run_tso_segment(tmp_path, monkeypatch, "o1", "--hlspdir", "d", "--sector", "98", "--refit") == 0
+    assert recorder.calls[0][1][-1] == "--refit"
+
 
 def test_calibrate_tso_segment_errors(tmp_path, monkeypatch, recorder, capsys):
     monkeypatch.setattr(_segments, "cadence_seconds", lambda path: 200.0)

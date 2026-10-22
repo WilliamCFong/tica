@@ -312,8 +312,7 @@ def _get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFil
     catalogs = catalog.query(pointing, TMAG_MIN, TMAG_MAX)
     logging.info('TIC from {}: {} stars in {} cones'.format(
         catalog.source, sum(len(c) for c in catalogs), len(catalogs)))
-    for i, curRa in enumerate(raCtrl2D_flat):
-        curDec = decCtrl2D_flat[i]
+    for i in range(len(raCtrl2D_flat)):
         cat = catalogs[i]
         tics, ticRas, ticDecs, ticTmags, ticpmRAs, ticpmDecs = \
             cat.tic, cat.ra, cat.dec, cat.tmag, cat.pmra, cat.pmdec

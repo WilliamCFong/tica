@@ -166,3 +166,39 @@ def test_whole_orbit_has_empty_orb_seg(site, tmp_path):
     path = (tmp_path / "s0035" / "cam2-ccd3"
             / "hlsp_tica_tess_ffi_s0035-o1-{:08d}-cam2-ccd3_tess_v01_img.fits".format(FINS[0]))
     assert fits.getheader(path)["ORB_SEG"] == ""
+
+
+def test_refit_rewrites_delivered_images(site, tmp_path):
+    root, inlist, refdir = site
+    one = tmp_path / "inlist"
+    one.write_text(inlist.read_text().splitlines()[0] + "\n")
+    argv = [str(one), "--outdir", str(tmp_path), "--caldir", str(CALDIR_10MIN), "--orb_seg", "o1a",
+            "--hlspdir", str(tmp_path / "s0035"), "--sector", "35", "--refdir", str(refdir),
+            "--workdir", str(tmp_path / "work"), "--no_diagnostics",   # tica_logs/ is made as needed
+            "--log", str(tmp_path / "x.log")]
+    assert cal_ffi2hlsp.main(argv) == 0
+    path = hlsp_path(tmp_path, FINS[0], 3)
+    with fits.open(path, mode="update") as f:
+        f[0].header["CRVAL1"] = 0.0                          # as if fitted to other star lists
+    assert cal_ffi2hlsp.main(argv) == 0
+    assert fits.getheader(path)["CRVAL1"] == 0.0              # left alone
+    assert cal_ffi2hlsp.main(argv + ["--refit"]) == 0
+    assert fits.getheader(path)["CRVAL1"] != 0.0              # fitted again
+    assert (tmp_path / "work" / "tica_logs" / "tica_wcs_step2_cam2_ccd3.log").exists()
+
+
+def test_uncalibratable_ffi_still_records_the_others(site, tmp_path):
+    root, inlist, refdir = site
+    bad = tmp_path / "tess2025001000000-00100009-2-crm-ffi.fits"
+    bad.write_text("not a FITS file")
+    two = tmp_path / "inlist"
+    two.write_text(inlist.read_text().splitlines()[0] + "\n" + str(bad) + "\n")
+    rc = cal_ffi2hlsp.main([str(two), "--outdir", str(tmp_path), "--caldir", str(CALDIR_10MIN),
+                            "--orb_seg", "o1a", "--hlspdir", str(tmp_path / "s0035"), "--sector", "35",
+                            "--refdir", str(refdir), "--workdir", str(tmp_path),
+                            "--log", str(tmp_path / "tica_logs" / "o1a_tica.log")])
+    assert rc == 1
+    rows = (tmp_path / "cal_timeseries.txt").read_text().splitlines()
+    assert len(rows) == 2 and "{:08d}".format(FINS[0]) in rows[1]
+    log = (tmp_path / "tica_logs" / "tica_wcs_step2_cam2_ccd1.log").read_text()
+    assert "Delivered 1 images, 1 failed" in log

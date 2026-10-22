@@ -84,6 +84,7 @@ def make_site(root, orbits=(204, 205), stems=1):
             "--production-table", str(Path(root) / "production_table.md"),
             "--records-copy", str(Path(root) / "repo"),
             "--caldir", str(Path(root) / "cal"), "--ncores", "8", "--ncores-wcs", "2",
+            "--settle-minutes", "0",
             "--mail-start", "start@x", "--mail-success", "ok@x,ok2@x", "--mail-error", "err@x"]
 
 
@@ -117,7 +118,12 @@ class FakeSteps:
                     if "--hlspdir" in args:
                         out = Path(args[args.index("--hlspdir") + 1]) / "cam{}-ccd{}".format(i, j)
                         out.mkdir(parents=True, exist_ok=True)
-                        (out / "hlsp_tica_tess_ffi_s0098-o1-00100724-cam{}-ccd{}_tess_v01_img.fits".format(i, j)).touch()
+                        # an FFI of the segment: make_site numbers them orbit*1000 (+10 for b)
+                        orbit = args[1] if args[1] != "None" else args[3]
+                        orbseg = args[args.index("--orbseg") + 1]
+                        fin = int(orbit) * 1000 + (10 if orbseg.endswith("b") else 0)
+                        (out / "hlsp_tica_tess_ffi_s0098-o1-{:08d}-cam{}-ccd{}_tess_v01_img.fits".format(
+                            fin, i, j)).touch()
                         (d / "wcs_diags2").mkdir(exist_ok=True)
                 if "--fin" not in args and "--no_diagnostics" not in args:
                     (cwd / "cam{}_ccd1".format(i) / "cal_timeseries.txt").touch()
@@ -166,7 +172,7 @@ def test_doall_o1a_success(tmp_path, run_doall):
     assert all(a[:6] == ["--o1", "205", "--o2", "None", "--orbseg", "o1a"] for a in tso)
     assert tso[0][-1:] == ["--no_write"]
     assert tso[1][-2:] == ["--fin", "00100724"]
-    assert tso[2][-5:] == ["--hlspdir", delivery, "--sector", "98", "--no_diagnostics"]
+    assert tso[2][-6:] == ["--hlspdir", delivery, "--sector", "98", "--no_diagnostics", "--refit"]
     args = dict(calls)
     ephem = str(tmp_path / "btjd" / "tess_ephem.txt")
     assert args["dump_ephemeris"] == ["--ephemeris", str(tmp_path / "kernel.tm"), "--output", ephem]
@@ -380,3 +386,45 @@ def test_doall_stops_without_a_reference_frame(tmp_path, run_doall, monkeypatch)
     assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime"]
     assert "Pick one by hand with --reffin" in mails[-1][2]
     assert (tmp_path / "records.txt").read_text().endswith(" error\n")
+
+
+def test_already_processed_accepts_old_whole_directory_counts(tmp_path):
+    records = tmp_path / "records.txt"
+    # the old automation recorded o1b with the counts of both halves
+    records.write_text("98 205 o1a 2992 2992 2992 2992 tess2025001000000 finished\n"
+                       "98 205 o1b 5790 5790 5790 5790 tess2025002000000 finished\n")
+    assert doall_automate.already_processed(records, "205", "o1b", "98 205 o1b 2798 2798 2798 2798 tess2025002000000")
+    assert doall_automate.already_processed(records, "205", "o1a", "98 205 o1a 2992 2992 2992 2992 tess2025001000000")
+    # more FFIs than recorded, or a new stem: process again
+    assert not doall_automate.already_processed(records, "205", "o1a", "98 205 o1a 2993 2992 2992 2992 tess2025001000000")
+    assert not doall_automate.already_processed(records, "205", "o1b", "98 205 o1b 2798 2798 2798 2798 tess2025003000000")
+
+
+def test_doall_waits_for_ffis_to_settle(tmp_path, run_doall, capsys):
+    argv = make_site(tmp_path)
+    argv[argv.index("--settle-minutes") + 1] = "30"     # the fake FFIs were just written
+    assert run_doall(argv) == (0, [], [])
+    assert "still arriving in orbit 205" in capsys.readouterr().out
+
+
+def test_doall_reports_other_segments_fitted_with_old_star_lists(tmp_path, run_doall):
+    argv = make_site(tmp_path)
+    # an image from another segment, delivered before o1a was rerun
+    other = tmp_path / "delivery" / "s0098" / "cam1-ccd1"
+    other.mkdir(parents=True)
+    (other / "hlsp_tica_tess_ffi_s0098-o1-00205900-cam1-ccd1_tess_v01_img.fits").touch()
+
+    rc, calls, mails = run_doall(argv)
+
+    assert rc == 0
+    warning = [m for m in mails if m[0] == "tica processing warning"]
+    assert len(warning) == 1 and warning[0][1] == "err@x"
+    assert "1 CCD images already delivered" in warning[0][2] and "00205900" in warning[0][2]
+
+
+def test_doall_ephemeris_outdir_is_an_alias(tmp_path, run_doall, capsys):
+    argv = without_option(make_site(tmp_path), "--ephemeris-file")
+    rc, calls, _ = run_doall(argv + ["--ephemeris-outdir", str(tmp_path / "eph")])
+    assert rc == 0
+    assert dict(calls)["dump_ephemeris"][-2:] == ["--output", str(tmp_path / "eph" / "tess_ephem.txt")]
+    assert "deprecated" in capsys.readouterr().out

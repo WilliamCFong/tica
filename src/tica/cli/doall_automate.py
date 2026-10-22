@@ -4,6 +4,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 from btjd import EPHEMERIS_ENV, packaged_ephemeris
 from tica.cli import _common, _segments
@@ -25,7 +26,8 @@ Each calibrated CCD image is written once, straight to the delivery
 directory <outputdir>/s<S>, by tica-calibrate-tso --hlspdir (calibration and
 WCS fit in memory). No FFIs are kept in <workdir>. For the sector's first
 segment (o1a, or a whole o1), which needs a new WCS reference frame, the
-steps are:
+steps are as below; its images are fitted again even if already delivered,
+and images of other segments delivered before are reported:
   tica-calibrate-tso --no_write    backgrounds for tica-darktime, no FFIs
   tica-darktime --save_reffin      pick the reference frame
   tica-calibrate-tso --fin         write the 16 reference CCD images
@@ -79,6 +81,9 @@ def build_parser():
     parser.add_argument("--segment", help="process only this segment of the orbit (e.g. o1a, or o1 for "
                         "an orbit downlinked whole). Segments after the sector's first need its "
                         "reference star lists in <workdir>/sector<S>/refout/")
+    parser.add_argument("--settle-minutes", type=float, default=float(_env("TICA_SETTLE_MINUTES", "30")),
+                        help="wait until the orbit's newest FFI is this old, so a downlink still "
+                        "being copied in is not processed [TICA_SETTLE_MINUTES] (default: %(default)s)")
     parser.add_argument("--reffin", metavar="FIN",
                         help="WCS reference frame (FIN, e.g. 01324500) for the sector's first segment, "
                         "instead of the one tica-darktime picks")
@@ -107,6 +112,9 @@ def build_parser():
                         help="tess_ephem.txt to update with tica-dump-ephemeris and read in the "
                         "WCS fit [{}] (default: the copy installed with TICA, {})".format(
                             EPHEMERIS_ENV, packaged_ephemeris()))
+    parser.add_argument("--ephemeris-outdir", default=_env("TICA_EPHEMERIS_OUTDIR", None), metavar="DIR",
+                        help="deprecated: same as --ephemeris-file DIR/tess_ephem.txt "
+                        "[TICA_EPHEMERIS_OUTDIR]")
     parser.add_argument("--records-copy", default=_env("TICA_RECORDS_COPY", checkout_path() or ""),
                         help="directory to copy the records file to after each run; empty to skip "
                         "[TICA_RECORDS_COPY] (default: the TICA checkout this runs from, if any: "
@@ -155,9 +163,27 @@ def sector_from_orbit(orbit):
     return (orbit - 7) // 2
 
 
+def minutes_since_last_ffi(dstem, orbit):
+    """Minutes since an FFI last arrived in <dstem>/orbit-<orbit>/ffi_fits, or None if empty."""
+    try:
+        with os.scandir(os.path.join(dstem, 'orbit-{}'.format(orbit), 'ffi_fits')) as entries:
+            newest = max((e.stat().st_mtime for e in entries if e.name.startswith('tess')), default=None)
+    except OSError:
+        return None
+    return None if newest is None else (time.time() - newest) / 60.0
+
+
+def delivered_outside(delivery, seg):
+    """Delivered CCD images whose cadence is not in segment seg."""
+    fins = {_segments.parse_name(f)[1] for files in seg.files.values() for f in files}
+    names = sorted(glob.glob(os.path.join(delivery, 'cam*-ccd*', 'hlsp_*_img.fits')))
+    # hlsp_tica_tess_ffi_s<sector>-<orbit>-<fin>-cam<i>-ccd<j>_tess_<version>_img.fits
+    return [n for n in names if int(os.path.basename(n).split('-')[2]) not in fins]
+
+
 def missing_ref_stars(workdir, sector):
     """The WCS reference star lists from o1a that are not in <workdir>/refout/."""
-    paths = [os.path.join(workdir, 'refout', 'reftica_s{}_{}-{}.h5'.format(sector, i, j))
+    paths = [_common.ref_stars_path(os.path.join(workdir, 'refout'), sector, i, j)
              for i in range(1, 5) for j in range(1, 5)]
     return [p for p in paths if not os.path.isfile(p)]
 
@@ -167,14 +193,28 @@ def record_line(sector, orbit, segment, counts, stem):
 
 
 def already_processed(records, orbit, segment, checkstr):
-    """True if a records line for this orbit and segment contains checkstr."""
+    """True if --records lists this segment with the same stem and at least these counts.
+
+    Records written before segments were worked out from the files counted
+    every FFI of the orbit directory, so a second half (o1b, o2b) was recorded
+    with both halves' counts; any line with the same orbit, segment and stem
+    whose counts cover the current ones therefore counts as processed. More
+    FFIs under the same stem than recorded means the delivery has grown, and
+    the segment is processed again.
+    """
     try:
         with open(records) as f:
             matches = [line.rstrip('\n') for line in f if '{} {}'.format(orbit, segment) in line]
     except OSError:
         return False
     print(' '.join(' '.join(matches).split()))
-    return checkstr in '\n'.join(matches)
+    want = checkstr.split()
+    for line in matches:
+        fields = line.split()
+        if (len(fields) >= 8 and fields[1:3] == want[1:3] and fields[7] == want[7]
+                and all(int(r) >= int(c) for r, c in zip(fields[3:7], want[3:7]))):
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ actions
@@ -278,6 +318,13 @@ def run(args, mailer):
             print("No orbit directories found in {}.".format(dstem))
             return 1
         orbit = lastdir.split('-')[1]
+
+    # a downlink still being copied in would be split into segments wrongly
+    age = minutes_since_last_ffi(dstem, orbit)
+    if age is not None and age < args.settle_minutes:
+        print("FFIs are still arriving in orbit {} (the newest is {:.0f} minutes old, less than "
+              "--settle-minutes {}); not processing yet.".format(orbit, age, args.settle_minutes))
+        return 0
 
     try:
         segments = _segments.find_segments(dstem, orbit)
@@ -409,10 +456,19 @@ def process_segment(args, mailer, orbit, SECTOR, seg, checkstr):
             return 3
         remove_reference_frames(workdir)
 
-        print("Running tica-calibrate-tso --hlspdir...")
-        rc = _common.run_command('calibrate_tso', calibrate + deliver + ['--no_diagnostics'],
+        print("Running tica-calibrate-tso --hlspdir --refit...")
+        # the star lists were just remade, so images delivered before are fitted again
+        rc = _common.run_command('calibrate_tso', calibrate + deliver + ['--no_diagnostics', '--refit'],
                                  cwd=workdir)
         errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
+        stale = delivered_outside(delivery, seg)
+        if stale:
+            message = ("TICA s{} {}: the WCS reference star lists were remade, but {} CCD images "
+                       "already delivered in {} from other segments (e.g. {}) were fitted against "
+                       "the previous ones. Reprocess those segments (remove their --records lines).").format(
+                           SECTOR, segment, len(stale), delivery, stale[0])
+            print(message)
+            mailer.send("tica processing warning", args.mail_error, message)
     else:
         print("Running tica-calibrate-tso --hlspdir...")
         rc = _common.run_command('calibrate_tso', calibrate + deliver, cwd=workdir)
@@ -463,6 +519,10 @@ def write_record(args, checkstr, status):
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.ephemeris_outdir and not args.ephemeris_file:
+        print("--ephemeris-outdir/TICA_EPHEMERIS_OUTDIR is deprecated; use --ephemeris-file/"
+              "TICA_EPHEMERIS.")
+        args.ephemeris_file = os.path.join(args.ephemeris_outdir, 'tess_ephem.txt')
     if os.path.isdir(args.records):
         print("Configuration Error. --records {} is a directory; give the records file, e.g. "
               "{}".format(args.records, os.path.join(args.records, 'tica-processing-records.txt')))

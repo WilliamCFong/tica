@@ -63,7 +63,7 @@ def main(argv=None):
     for iCam in range(1, 5):
         for jCcd in range(1, 5):
             USE_REF = _common.sorted_glob('{}cam{}_ccd{}/tess*{}*'.format(dstem, iCam, jCcd, args.reffin))
-            USE_OUT = '{}refout/reftica_s{}_{}-{}.h5'.format(dstem, args.sector, iCam, jCcd)
+            USE_OUT = _common.ref_stars_path(os.path.join(dstem, 'refout'), args.sector, iCam, jCcd)
 
             if os.path.exists(USE_OUT):
                 if not args.overwrite:

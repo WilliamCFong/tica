@@ -40,7 +40,7 @@ def hlsp_image_name(sector, segment, fin, camnum, ccdnum, version):
 def copy_ref_stars(camnum, ccdnum, version, outdir, sector):
     """Copy refout/reftica_s<sector>_<i>-<j>.h5 to <outdir>/ref-stars/."""
     os.makedirs(outdir + '/ref-stars', exist_ok=True)
-    ref = os.path.abspath('refout/reftica_s{}_{}-{}.h5'.format(sector, camnum, ccdnum))
+    ref = os.path.abspath(_common.ref_stars_path('refout', sector, camnum, ccdnum))
     try:
         shutil.copyfile(ref, '{}/ref-stars/hlsp_tica_tess_ffi_s{:04d}-cam{}-ccd{}_tess_{}_cat.h5'.format(
             outdir, int(sector), camnum, ccdnum, version))

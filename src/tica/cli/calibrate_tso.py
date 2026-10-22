@@ -67,6 +67,8 @@ def build_parser():
     parser.add_argument("--sector", type=int, help="sector number, for --hlspdir")
     parser.add_argument("--hlsp_version", default='v01',
                         help="delivery version, for --hlspdir (default: %(default)s)")
+    parser.add_argument("--refit", action="store_true",
+                        help="with --hlspdir, fit and write images already delivered again")
     parser.add_argument("--no_diagnostics", action="store_true",
                         help="do not write cal_timeseries.txt, e.g. after a --no_write run")
     return parser
@@ -100,9 +102,10 @@ def check_config(o1, o2, orbseg):
     return None
 
 
-def orbit_files(dstem, orbit, cam, orbseg, slash='//'):
+def orbit_files(dstem, orbit, cam, orbseg, slash='//', segments=None):
     """Raw FFIs of one camera in one orbit, or None if the orbit has no segment orbseg.
 
+    segments are the orbit's _segments.find_segments, if already known.
     Raises _segments.OffNominal if the orbit's FFIs don't fall into one or two
     downlinks.
     """
@@ -113,7 +116,9 @@ def orbit_files(dstem, orbit, cam, orbseg, slash='//'):
         files += _common.sorted_glob('{}{}orbit-{}/ffi_fits/tess*-{}-crm-ffi.fits*'.format(dstem, slash, orbit, cam))
         return files
 
-    segment = _segments.find_segment(dstem, orbit, orbseg)
+    if segments is None:
+        segments = _segments.find_segments(dstem, orbit)
+    segment = next((seg for seg in segments if seg.name == orbseg), None)
     return None if segment is None else segment.files.get(cam, [])
 
 
@@ -160,19 +165,26 @@ def main(argv=None):
             os.makedirs(os.path.join(outdir, 'cam{}_ccd{}'.format(i, j)), exist_ok=True)
     os.makedirs(os.path.join(outdir, 'tica_logs'), exist_ok=True)
 
+    #the segments of each orbit, worked out once
+    segments = {}
+    if orbseg != '':
+        for orbit in (o1, o2):
+            if orbit != "None":
+                try:
+                    segments[orbit] = _segments.find_segments(dstem, orbit)
+                except _segments.OffNominal as e:
+                    print("Configuration Error. {}".format(e))
+                    return 2
+
     #make inlist for tica
     for i in range(1, 5):
         files = []
         for orbit, name, slash in ((o1, 'o1', '//'), (o2, 'o2', '/')):
             if orbit == "None":
                 continue
-            try:
-                found = orbit_files(dstem, orbit, i, orbseg, slash=slash)
-            except _segments.OffNominal as e:
-                print("Configuration Error. {}".format(e))
-                return 2
+            found = orbit_files(dstem, orbit, i, orbseg, slash=slash, segments=segments.get(orbit))
             if found is None:
-                names = [seg.name for seg in _segments.find_segments(dstem, orbit)]
+                names = [seg.name for seg in segments[orbit]]
                 print("Error.  Requested {} but could not find correct segment in "
                       "{}/orbit-{}/ffi_fits; it has {}.".format(orbseg, dstem, orbit,
                                                                ', '.join(names) or 'no FFIs'))
@@ -192,13 +204,15 @@ def main(argv=None):
 
     # the keyword is empty for a whole orbit (see _segments); tica-cal-ffi2hlsp
     # also needs the segment name for the file names, and works this out itself
-    keyword = orbseg if orbseg.endswith(('a', 'b')) else ''
+    keyword = _segments.orb_seg_keyword(orbseg)
     if args.hlspdir is not None:
         keyword = orbseg
         module = 'cal_ffi2hlsp'
         options = ['--hlspdir', os.path.abspath(args.hlspdir), '--sector', args.sector,
                    '--refdir', os.path.join(outdir, 'refout'), '--workdir', outdir,
                    '--hlsp_version', args.hlsp_version]
+        if args.refit:
+            options.append('--refit')
     else:
         module = 'cal_ffi2ccds'
         options = ['--no_gzip']

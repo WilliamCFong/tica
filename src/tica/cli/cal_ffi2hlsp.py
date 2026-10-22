@@ -8,7 +8,8 @@ from astropy.io import fits
 
 import tica
 from tica.cli._common import (add_file_list_args, get_calibration, load_calibration,
-                              map_files, read_file_list, setup_run_logging)
+                              map_files, read_file_list, ref_stars_path, setup_run_logging)
+from tica.cli._segments import orb_seg_keyword
 from tica.cli.cal_ffi2ccds import ffi_diagnostics, write_timeseries
 from tica.cli.stage_delivery import hlsp_image_name
 from tica.cli.wcs_step2 import rotate_log
@@ -29,8 +30,10 @@ the calibration COMMENT.
 The reference star lists from tica-wcs-step1 must already exist, as
 <refdir>/reftica_s<sector>_<i>-<j>.h5. CCD images already in the delivery
 directory are not refit; their WCS diagnostics are read from their headers,
-so an interrupted run can be repeated. Files are written under a .part name
-and renamed when complete.
+so an interrupted run can be repeated. With --refit they are fitted and
+written again, e.g. after the star lists were remade. Files are written under
+a .part name and renamed when complete. A raw FFI that cannot be calibrated
+counts as 4 failed CCD images; the others are still delivered and recorded.
 
 Like tica-cal-ffi2ccds, it writes cal_timeseries.txt to --outdir. WCS
 diagnostics go to <workdir>/cam<i>_ccd<j>/wcs_diags2/ and a log for each CCD
@@ -44,18 +47,17 @@ PROG = 'tica-cal-ffi2hlsp'
 FIT_DEGREE = 6
 
 
-def ref_stars_path(refdir, sector, camnum, ccdnum):
-    return os.path.join(refdir, 'reftica_s{}_{}-{}.h5'.format(sector, camnum, ccdnum))
-
-
 def camera_of(filename):
     """Camera number from a POC file name, tess<stamp>-<fin>-<cam>-crm-ffi.fits."""
     return int(os.path.basename(filename).split('-')[2])
 
 
-def write_hlsp(hdu, path, intuple):
-    """Fit the WCS of one CCD image and write it to path; return the fit diagnostics."""
-    if os.path.exists(path):
+def write_hlsp(hdu, path, intuple, refit=False):
+    """Fit the WCS of one CCD image and write it to path; return the fit diagnostics.
+
+    An image already at path is left as it is unless refit is set.
+    """
+    if os.path.exists(path) and not refit:
         # already delivered: fit_hdulist reads the diagnostics from the header
         with fits.open(path) as hdulist:
             all_hdus, result = fit_hdulist(hdulist, intuple)
@@ -73,14 +75,20 @@ def worker(in_tuple):
 
     Returns (filename, camnum, diagnostics, wcs_results), where
     wcs_results[j-1] is the fit diagnostics of CCD j, or None if it failed.
+    diagnostics is None if the FFI could not be calibrated (or with
+    --no_diagnostics).
     """
     filename, index, args = in_tuple
     calibration, wcs_params = get_calibration()
     logger = logging.getLogger(__name__)
 
-    # whole orbits get an empty ORB_SEG, as tica-calibrate-tso always wrote
-    keyword = args.orb_seg if args.orb_seg.endswith(('a', 'b')) else ''
-    im = FFI_File(filename, calibration=calibration, outdir=None, orbit_segment=keyword)
+    try:
+        # whole orbits get an empty ORB_SEG, as tica-calibrate-tso always wrote
+        im = FFI_File(filename, calibration=calibration, outdir=None,
+                      orbit_segment=orb_seg_keyword(args.orb_seg))
+    except Exception:
+        logger.exception('failed to calibrate {}'.format(filename))
+        return filename, camera_of(filename), None, [None] * 4
     fin = os.path.basename(filename).split('-')[1]
 
     wcs_results = []
@@ -91,7 +99,8 @@ def worker(in_tuple):
         try:
             os.makedirs(outdir, exist_ok=True)
             wcs_results.append(write_hlsp(hdu, path,
-                                          worker_args(path, index, wcs_params[(im.camnum, ccdnum)])))
+                                          worker_args(path, index, wcs_params[(im.camnum, ccdnum)]),
+                                          refit=args.refit))
         except Exception:
             logger.exception('failed to deliver {} CCD {}'.format(filename, ccdnum))
             wcs_results.append(None)
@@ -102,6 +111,7 @@ def worker(in_tuple):
 
 def write_wcs_log(path, settings, lines):
     """A tica-wcs-step2 style log, with the lines tica-production-table reads."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     rotate_log(path)
     handler = logging.FileHandler(path)
     handler.setFormatter(logging.Formatter('%(asctime)s %(message)s', '%Y.%m.%d %H:%M:%S'))
@@ -142,6 +152,9 @@ def build_parser():
     parser.add_argument("--no_diagnostics", action="store_true",
                         help="if set, do not write cal_timeseries.txt, e.g. because a "
                         "--no_write run of tica-cal-ffi2ccds already did.")
+    parser.add_argument("--refit", action="store_true",
+                        help="fit and write CCD images that are already in the delivery directory "
+                        "again, e.g. after the reference star lists were remade")
     return parser
 
 
@@ -183,7 +196,8 @@ def main(argv=None):
                         calibration=(calibration, wcs_params))
 
     if not args.no_diagnostics:
-        write_timeseries(args.outdir, [(f, diagnostics) for f, _, diagnostics, _ in results])
+        write_timeseries(args.outdir, [(f, diagnostics) for f, _, diagnostics, _ in results
+                                       if diagnostics is not None])
 
     runtime = time() - starttime
     nfailed = 0

@@ -28,6 +28,11 @@ def get_calibration():
     return _calibration
 
 
+def ref_stars_path(refdir, sector, camnum, ccdnum):
+    """The WCS reference star list made by tica-wcs-step1 for one CCD."""
+    return os.path.join(refdir, 'reftica_s{}_{}-{}.h5'.format(int(sector), camnum, ccdnum))
+
+
 def checkout_root():
     """The TICA checkout this package is installed from (an editable install), or None."""
     root = Path(tica.__file__).resolve().parents[2]
