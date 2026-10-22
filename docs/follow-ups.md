@@ -19,7 +19,7 @@ This command (`src/tica/cli/doall_automate.py`; a bash script in `bin/` until th
 6. **The orbit→sector and segment mappings are hardcoded** (`sector_from_orbit` and `segment_from_orbit` in `doall_automate.py`). The special cases for orbits 203–208 and the switch from `(orbit−7)/2` to `(orbit−11)/2` must be edited by hand whenever the mission timeline changes. Move them to a lookup table (orbit → sector, segment) that can be updated without code changes, or derive them from POC metadata if available.
 7. ~~**Site-specific configuration is hardcoded**~~ *Fixed: paths, core counts and recipients are options with `TICA_*` environment variables (see `tica-doall-automate --help`).* The defaults are still the MIT production values, including personal email addresses, which shouldn't live in a public repository. Consider moving the defaults into the production cron environment.
 8. **No lock file.** If a run takes longer than the cron interval, two runs can overlap on the same segment. Consider `flock` around the cron command, or a lock file in `--workdir`. (The shell-specific issues, such as unquoted variables, went away with the Python port.)
-9. **Its runtime dependencies are undeclared.** It needs `mail`, the POC SPICE kernels, and the POC directory layout. None of this is documented.
+9. **Its runtime dependencies are undeclared.** It needs (since the notifications change, an SMTP server named in its `--mail` config rather than) `mail`, the POC SPICE kernels, and the POC directory layout. None of this is documented.
 
 ### Docker
 

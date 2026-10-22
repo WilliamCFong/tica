@@ -39,20 +39,27 @@ def test_already_processed(tmp_path):
 
 
 class Args:
-    mail_error = "ops@example.org"
+    pass
 
 
-class FakeMailer:
+OPS = ("operators",)
+ESCALATE = ("operators", "escalation")
+DOWN = ("downstream",)
+
+
+class FakeNotifier:
+    """Records (subject, audiences, body) for each notice."""
+
     def __init__(self):
         self.sent = []
 
-    def send(self, subject, recipients, message):
-        self.sent.append((subject, recipients, message))
+    def send(self, audiences, subject, body):
+        self.sent.append((subject, tuple(audiences), body))
 
 
 @pytest.mark.parametrize("rc, flag, abort", [(0, 0, None), (1, 1, None), (2, None, 2), (137, None, 3)])
 def test_check_step_exit_code_contract(rc, flag, abort):
-    mailer = FakeMailer()
+    mailer = FakeNotifier()
     if abort is None:
         assert doall_automate.check_step(rc, "tica-x", Args(), mailer, "98 205 o1a") == flag
         assert mailer.sent == []
@@ -60,7 +67,8 @@ def test_check_step_exit_code_contract(rc, flag, abort):
         with pytest.raises(doall_automate.Abort) as exc:
             doall_automate.check_step(rc, "tica-x", Args(), mailer, "98 205 o1a")
         assert exc.value.code == abort
-        assert mailer.sent[0][:2] == ("tica proceessing error", "ops@example.org")
+        assert mailer.sent[0][1] == ESCALATE
+        assert mailer.sent[0][0].startswith("98 205 o1a: FAILED")
 
 
 # ---------------------------------------------------------------- end to end
@@ -85,7 +93,7 @@ def make_site(root, orbits=(204, 205), stems=1):
             "--records-copy", str(Path(root) / "repo"),
             "--caldir", str(Path(root) / "cal"), "--ncores", "8", "--ncores-wcs", "2",
             "--settle-minutes", "0",
-            "--mail-start", "start@x", "--mail-success", "ok@x,ok2@x", "--mail-error", "err@x"]
+            "--no-mail"]
 
 
 def make_ref_stars(root, sector=98):
@@ -149,9 +157,9 @@ class FakeSteps:
 def run_doall(monkeypatch):
     def run(argv, rcs=None, cadence=200.0):
         steps = FakeSteps(rcs)
-        mailer = FakeMailer()
+        mailer = FakeNotifier()
         monkeypatch.setattr(_common, "run_command", steps)
-        monkeypatch.setattr(doall_automate, "Mailer", lambda enabled: mailer)
+        monkeypatch.setattr(doall_automate, "make_notifier", lambda args: mailer)
         # the fake FFIs are empty: 200 s cadences
         monkeypatch.setattr(_segments, "cadence_seconds", lambda path: cadence)
         # the run exports TICA_EPHEMERIS for its steps; keep that out of other tests
@@ -182,7 +190,11 @@ def test_doall_o1a_success(tmp_path, run_doall):
     assert args["stage_delivery"] == ["v01", delivery, "o1a", "98", "--ref-stars-only"]
     assert args["production_table"] == ["--segments", "o1a", "--wcs1",
                                         "--output", str(tmp_path / "production_table.md")]
-    assert [m[1] for m in mails] == ["start@x", "ok@x,ok2@x"]
+    assert [m[1] for m in mails] == [OPS, OPS, DOWN]
+    assert [m[0] for m in mails] == ["Sector 98 o1a (orbit 205): started", "Sector 98 o1a (orbit 205): finished",
+                                     "Sector 98 o1a delivery ready"]
+    assert "48 CCD images, cadences 00205000 to 00205002" in mails[2][2]
+    assert str(tmp_path / "delivery") + "/s0098" in mails[2][2]
     assert (tmp_path / "records.txt").read_text() == "98 205 o1a 3 3 3 3 tess2025001000000 finished\n"
     seg = tmp_path / "work" / "sector98" / "cam2_ccd1" / "o1a"
     assert sorted(p.name for p in seg.iterdir()) == [
@@ -213,8 +225,9 @@ def test_doall_o1b_error_records_and_mails(tmp_path, run_doall):
     assert dict(calls)["calibrate_tso"][-4:] == ["--hlspdir", str(tmp_path / "delivery") + "/s0098",
                                                  "--sector", "98"]
     assert "production_table" not in [m for m, _ in calls]
-    assert mails[-1][1] == "err@x"
-    assert "there were errors" in mails[-1][2]
+    assert mails[-1][:2] == ("Sector 98 o1b (orbit 205): finished with errors", ESCALATE)
+    assert "not announced downstream" in mails[-1][2]
+    assert DOWN not in [m[1] for m in mails]
     assert (tmp_path / "records.txt").read_text().splitlines()[-1] == \
         "98 205 o1b 3 3 3 3 tess2025002000000 error"
     assert (tmp_path / "repo" / "records.txt").read_text() == (tmp_path / "records.txt").read_text()
@@ -225,7 +238,7 @@ def test_doall_aborts(tmp_path, run_doall, rc_step, rc_exit):
     rc, calls, mails = run_doall(make_site(tmp_path), rcs={"calibrate_tso": rc_step})
     assert rc == rc_exit
     assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso"]
-    assert mails[-1][:2] == ("tica proceessing error", "err@x")
+    assert mails[-1][1] == ESCALATE and "FAILED" in mails[-1][0]
     assert not (tmp_path / "records.txt").exists()
 
 
@@ -326,7 +339,7 @@ def test_doall_orbit_with_both_halves_runs_them_in_order(tmp_path, run_doall):
     assert (tmp_path / "records.txt").read_text().splitlines() == [
         "98 205 o1a 3 3 3 3 tess2025001000000 finished",
         "98 205 o1b 3 3 3 3 tess2025002000000 finished"]
-    assert [m[1] for m in mails] == ["start@x", "ok@x,ok2@x", "start@x", "ok@x,ok2@x"]
+    assert [m[1] for m in mails] == [OPS, OPS, DOWN, OPS, OPS, DOWN]
 
     # rerunning finds both recorded
     assert run_doall(argv + ["--orbit", "205"])[1] == []
@@ -361,8 +374,9 @@ def test_doall_stops_when_step1_makes_no_star_lists(tmp_path, run_doall):
     assert rc == 3
     assert [m for m, _ in calls] == ["dump_ephemeris", "calibrate_tso", "darktime", "calibrate_tso",
                                      "wcs_step1_allccd"]
-    subject, recipients, message = mails[-1]
-    assert (subject, recipients) == ("tica proceessing error", "err@x")
+    subject, audiences, message = mails[-1]
+    assert audiences == ESCALATE
+    assert subject == "Sector 98 o1a (orbit 205): FAILED, WCS step 1 made no star lists for 8 CCDs"
     assert "for 8 CCDs (1-1, 1-2, 1-3, 1-4, 2-1, 2-2, 2-3, 2-4)" in message
     assert "reference FIN 00100724" in message
     assert (tmp_path / "records.txt").read_text() == "98 205 o1a 3 3 3 3 tess2025001000000 error\n"
@@ -417,8 +431,8 @@ def test_doall_reports_other_segments_fitted_with_old_star_lists(tmp_path, run_d
     rc, calls, mails = run_doall(argv)
 
     assert rc == 0
-    warning = [m for m in mails if m[0] == "tica processing warning"]
-    assert len(warning) == 1 and warning[0][1] == "err@x"
+    warning = [m for m in mails if "warning" in m[0]]
+    assert len(warning) == 1 and warning[0][1] == OPS
     assert "1 CCD images already delivered" in warning[0][2] and "00205900" in warning[0][2]
 
 
