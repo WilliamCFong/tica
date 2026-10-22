@@ -12,7 +12,8 @@ from tess_stars2px import tess_stars2px_function_entry
 try:
     import pyds9 as pd
 except ImportError:
-    print('Warning: No pyds9 installed.  No debugging with image display available')
+    # only used to show images at high debug levels
+    pd = None
 from astropy.io import fits
 #import photutils.centroids as cent
 import matplotlib.pyplot as plt
@@ -23,8 +24,7 @@ import os
 import logging
 
 
-#from wcs_build.mast_filter_conesearch import mast_filter_conesearch
-from wcs_build.tic_local_conesearch import tic_local_conesearch
+from wcs_build.tic_catalog import CCDPointing, Cone
 
 
 from astropy import units as u
@@ -143,7 +143,24 @@ def getRoughTranslation(col, row, cam, ccd, img, region, limits, cam_want, ccd_w
     
     return offcol, offrow
 
-def apply_proper_motion(ras, decs, pmras, pmdecs, delyr):
+def reference_epoch(header):
+    """Mid-exposure time of an FFI, as an astropy Time (TDB).
+
+    TICA/TSO FFIs have MIDTJD and TJD_ZERO; SPOC FFIs have TSTART, TSTOP,
+    BJDREFI and BJDREFF.
+    """
+    if 'MIDTJD' in header and 'TJD_ZERO' in header:
+        jd = header['MIDTJD'] + header['TJD_ZERO']
+    elif all(k in header for k in ('TSTART', 'TSTOP', 'BJDREFI', 'BJDREFF')):
+        jd = (header['TSTART'] + header['TSTOP']) / 2.0 + header['BJDREFI'] + header['BJDREFF']
+    else:
+        raise ValueError('reference image header has neither MIDTJD/TJD_ZERO '
+                         'nor TSTART/TSTOP/BJDREFI/BJDREFF')
+    return Time(jd, format='jd', scale='tdb')
+
+
+def apply_proper_motion(ras, decs, pmras, pmdecs, epoch):
+    """Propagate J2000 TIC positions to epoch (an astropy Time)."""
     
     ccat = SkyCoord(ra=ras * u.deg,
                     dec=decs * u.deg,
@@ -152,15 +169,30 @@ def apply_proper_motion(ras, decs, pmras, pmdecs, delyr):
                     obstime=Time('J2000.0'),
                     distance=1000.0*u.pc,
                     radial_velocity = 0.0 * u.km/u.s)
-    # Convert coordinates to epoch 2021.0
-    curEpc = Time('J2021.0')
-    ccat_cur = ccat.apply_space_motion(curEpc)
+    ccat_cur = ccat.apply_space_motion(epoch)
     
     return ccat_cur.ra.degree, ccat_cur.dec.degree    
 
 def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile, 
                        DEBUG_LEVEL=0,
-                       wingFAC = 0.9, contrastFAC=3.5):
+                       wingFAC = 0.9, contrastFAC=3.5,
+                       catalog=None):
+    """Find control-point stars on REF_IMAGE and save them to outputFile.
+
+    catalog is the wcs_build.tic_catalog.TICProvider to get TIC stars
+    from; by default, the PostgreSQL TIC (wcs_build.tic_postgres).
+    """
+    if catalog is None:
+        from wcs_build.tic_postgres import PostgresTIC
+        with PostgresTIC() as catalog:
+            return _get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile,
+                                       DEBUG_LEVEL, wingFAC, contrastFAC, catalog)
+    return _get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile,
+                               DEBUG_LEVEL, wingFAC, contrastFAC, catalog)
+
+
+def _get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile,
+                        DEBUG_LEVEL, wingFAC, contrastFAC, catalog):
         
     # Use DS9 if it exists and debug level is high
     DEBUG_DS9 = True
@@ -172,6 +204,9 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
             DEBUG_DS9 = False
     # Open reference image
     hdulistCal = fits.open(REF_IMAGE)
+    # TIC positions are propagated to the time of the reference image
+    pmEpoch = reference_epoch(hdulistCal[0].header)
+    logging.info('Propagating TIC proper motions to JD {:.5f} (TDB, {})'.format(pmEpoch.jd, pmEpoch.isot))
     
     # Here are some hardcoded parametrers
     pixScl = 21.0 # arcsec 1 pixel pixScl arcsec
@@ -271,20 +306,28 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
     #  query TIC to get stars
     #  go over stars and make sure they have well behaved PRFs for isloated stars
 
-    #parallize this loop???
-    for i, curRa in enumerate(raCtrl2D_flat):
-        curDec = decCtrl2D_flat[i]
-        # Do mast cone Search on this subimage region
-        # tics, ticRas, ticDecs, ticTmags, ticKmags, ticGmags, ticpmRAs, ticpmDecs = mast_filter_conesearch(curRa, curDec, radSearch, TMAG_MIN, TMAG_MAX)
-        tics, ticRas, ticDecs, ticTmags, ticKmags, ticGmags, ticpmRAs, ticpmDecs = tic_local_conesearch(curRa, curDec, radSearch, TMAG_MIN, TMAG_MAX)
+    # One cone per subimage region
+    pointing = CCDPointing(SECTOR_WANT, CAMERA_WANT, CCD_WANT,
+                           tuple(Cone(float(ra), float(dec), radSearch/3600.0)
+                                 for ra, dec in zip(raCtrl2D_flat, decCtrl2D_flat)))
+    catalogs = catalog.query(pointing, TMAG_MIN, TMAG_MAX)
+    logging.info('TIC from {}: {} stars in {} cones'.format(
+        catalog.source, sum(len(c) for c in catalogs), len(catalogs)))
+    for i in range(len(raCtrl2D_flat)):
+        cat = catalogs[i]
+        tics, ticRas, ticDecs, ticTmags, ticpmRAs, ticpmDecs = \
+            cat.tic, cat.ra, cat.dec, cat.tmag, cat.pmra, cat.pmdec
         nSrch = len(tics)
+        if nSrch == 0:
+            logging.warning('No TIC stars in block {0:d}'.format(i))
+            continue
         # Sort the targets with brightest first
         idx = np.argsort(ticTmags)
         tics, ticRas, ticDecs, ticTmags, ticpmRAs, ticpmDecs = idx_filter(idx, \
                         tics, ticRas, ticDecs, ticTmags, ticpmRAs, ticpmDecs)
 
         #print(len(tics), ' ', curRa,' ', curDec, ' ', radSearch)
-        ticRas, ticDecs = apply_proper_motion(ticRas, ticDecs, ticpmRAs, ticpmDecs, 21.0)
+        ticRas, ticDecs = apply_proper_motion(ticRas, ticDecs, ticpmRAs, ticpmDecs, pmEpoch)
 
         # Get the predicted positions for these targets found in cone search using tess_stasrs2px reverese
         outID, outEclipLong, outEclipLat, outSec, outCam, outCcd, \
@@ -348,10 +391,12 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
                         gotN = gotN + 1
             j = j+1
         if (gotN < nTry):
-            print('Something went wrong determining initial pixel position correction on reference image!')
-            print('Could not find nTry: {} targets passing gdPRF (gotN: {})'.format(nTry,gotN))
-            logging.error('Something went wrong determining initial pixel position correction on reference image!')
-            logging.error('Could not find nTry: {0:d} targets passing gdPRF'.format(nTry))
+            message = ('Sector {} cam{} ccd{}: block {} of the reference image has only {} of the {} '
+                       'isolated stars (passing gdPRF) needed for the initial position correction; '
+                       'is the reference frame affected by stray light?').format(
+                           SECTOR_WANT, CAMERA_WANT, CCD_WANT, i, gotN, nTry)
+            print(message)
+            logging.error(message)
             raise SystemExit(1)
         # From these nTry targets calculate the col and row translation from prediction
         corCol = np.median(delCols)
@@ -586,9 +631,12 @@ def get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFile
     tmp = fout.create_dataset('aperturerows', data=kpApRows, compression='gzip')
 
     #example REF_IMAGE: tess2022072133152-00204040-1-crm-ffi_ccd1.cal.fits
-    fout.attrs['ref_FIN'] = REF_IMAGE.split('-')[1]
+    fout.attrs['ref_FIN'] = os.path.basename(REF_IMAGE).split('-')[1]
     fout.attrs['wingFAC']     = wingFAC
     fout.attrs['contrastFAC'] = contrastFAC
+    # epoch of ras/decs (JD, TDB) and where the TIC came from
+    fout.attrs['pm_epoch_jd'] = pmEpoch.jd
+    fout.attrs['tic_source'] = catalog.source
 #save the 
     fout.close()
 

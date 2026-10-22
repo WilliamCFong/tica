@@ -46,6 +46,14 @@ The file is 17.8 MB uncompressed. Float32 image data barely compresses, so gzip 
 
 The estimates above come from the profile, not from end-to-end measurements. Each change should be benchmarked against the baseline, and `make reg-test` must still pass. The test compares image data exactly, so changing the compression level is safe, but changing the arithmetic is not.
 
+## Production disk I/O (TSO)
+
+The regression test above reads SPOC files and gzips its outputs; production at the TSO does not gzip (`--no_gzip`), so its cost is plain disk I/O. Before the `single-write-pipeline` branch, `tica-doall-automate` wrote each calibrated CCD image three times: `tica-cal-ffi2ccds`, the in-place rewrite in `tica-wcs-step2`, and the copy in `tica-stage-delivery`. A nominal segment is ~2,800 cadences × 16 CCDs × 17.8 MB ≈ 800 GB, so that was ~2.4 TB written and ~1.6 TB re-read per segment. `tica-cal-ffi2hlsp` now calibrates and fits each FFI in memory and writes it once, to the delivery directory.
+
+A whole segment does not fit in memory (~800 GB nominal, ~1.6 TB for the longest segments), so the pipeline streams frames instead: each pool worker holds one raw camera FFI and its 4 CCDs, about 1 GB. On `o1a`, the WCS reference frame has to be chosen from the whole segment's backgrounds first, so that segment is calibrated twice; calibration is a small share of the runtime (S50: ~330 s per camera on 48 cores, against ~2,900 s per CCD on 1 core for WCS step 2).
+
+Not yet measured on the TSO machines: wall time before and after, and how much of WCS step 2's runtime was I/O.
+
 ## How to reproduce
 
 ```

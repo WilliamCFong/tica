@@ -191,3 +191,28 @@ The WCS differences can be analyzed by comparing the transforms of stars using t
 
 We recommend that users employ the existing WCSs to analyze these astrometric differences.  However, as a scripting example, we have provided a command that refits the TICA WCSs and overwrites the WCS keywords in the SPOC `*ffir*` files: `tica-wcs-spoc` (see `tica-wcs-spoc --help`).
 
+### Reference stars from the TIC
+
+`tica-wcs-step1` (and `tica-wcs-step1-allcam-allccd`) picks control-point stars from the TESS Input Catalog. Users fitting SPOC FFIs with `tica-wcs-spoc` don't need this: they use the reference star lists published with the HLSP.
+
+The TIC can come from two places, chosen with `--catalog`:
+
+- `postgres` (default): a PostgreSQL copy of the TIC with the q3c extension, as on the MIT servers. Connection details come from a standard libpq service file, never from TICA. The service is named by `--tic-service` or `$TICA_TIC_SERVICE` (default `tic`), and is looked up in `$PGSERVICEFILE` or `~/.pg_service.conf`. The password goes in `~/.pgpass`, which must be `chmod 600`:
+
+  ```
+  # ~/.pg_service.conf
+  [tic]
+  host=tic-db.example.edu
+  port=5432
+  dbname=tic
+  user=tica
+
+  # ~/.pgpass
+  tic-db.example.edu:5432:tic:tica:<password>
+  ```
+
+- `mast`: the MAST catalog API. It needs no credentials but is much slower.
+
+Both return the same selection: Tmag 7.5–12, proper motions within ±100 mas/yr (stars with no proper motion are excluded), and only entries with no TIC `disposition` flag. The full contract is in the docstring of `src/wcs_build/tic_catalog.py`. To read the TIC from somewhere else, subclass `TICProvider` there and pass it to `get_refimg_ctrlpts(..., catalog=...)`.
+
+TIC positions (epoch J2000) are propagated with their proper motions to the mid-exposure time of the reference FFI. That time is stored as `pm_epoch_jd` (JD, TDB) in the reference star `.h5` file, with the catalog source in `tic_source`.

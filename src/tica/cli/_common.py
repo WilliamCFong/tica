@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 from multiprocessing import Pool
+from pathlib import Path
 
 import numpy as np
 
@@ -25,6 +26,19 @@ def set_calibration(calibration):
 
 def get_calibration():
     return _calibration
+
+
+def ref_stars_path(refdir, sector, camnum, ccdnum):
+    """The WCS reference star list made by tica-wcs-step1 for one CCD."""
+    return os.path.join(refdir, 'reftica_s{}_{}-{}.h5'.format(int(sector), camnum, ccdnum))
+
+
+def checkout_root():
+    """The TICA checkout this package is installed from (an editable install), or None."""
+    root = Path(tica.__file__).resolve().parents[2]
+    if (root / 'pyproject.toml').is_file() and (root / 'src' / 'tica').is_dir():
+        return str(root)
+    return None
 
 
 def add_version_arg(parser):

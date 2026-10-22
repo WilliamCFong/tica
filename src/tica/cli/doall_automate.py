@@ -1,38 +1,82 @@
 import argparse
 import glob
 import os
+import platform
 import shutil
-import subprocess
 import sys
+import time
 
-from tica.cli import _common
+from btjd import EPHEMERIS_ENV, packaged_ephemeris
+from tica.cli import _common, _notify, _segments
 
 DESCRIPTION = """\
-Process the newest POC orbit segment end to end; meant to run from cron.
+Process a POC orbit end to end; meant to run from cron.
 
-Finds the most recently modified orbit-<N> directory under --dstem, works out
-the orbit segment (o1a, o1b, o2a, ...), and skips it if --records already
-lists it with the same file counts. Otherwise it refreshes the ephemeris and
-runs, in <workdir>/sector<S>: tica-calibrate-tso, tica-darktime,
-tica-wcs-step1-allcam-allccd (o1a only), tica-wcs-step2-allcam-allccd,
-tica-stage-delivery and tica-check-delivery, then appends to --records,
-updates the production table, and emails the result.
+Takes the orbit given by --orbit, or else the most recently modified
+orbit-<N> directory under --dstem, and works out its segments from the FFIs'
+cadences (see tica.cli._segments): o1a and o1b (o2a, o2b, ...) for an orbit
+downlinked in two halves, or o1 (o2, ...) for one downlinked whole, with
+re-delivered downlinks replacing the earlier copy. Each segment that
+--records doesn't already list with the same file counts and stamp is
+processed in order (or only --segment), in <workdir>/sector<S>: the ephemeris
+is refreshed, the segment is calibrated and delivered, then it is appended
+to --records, the production table is updated, and the result emailed.
 
-Each path, core count and recipient list can also be set with the
-environment variable shown in its help. The defaults are the MIT production
+Each calibrated CCD image is written once, straight to the delivery
+directory <outputdir>/s<S>, by tica-calibrate-tso --hlspdir (calibration and
+WCS fit in memory). No FFIs are kept in <workdir>. For the sector's first
+segment (o1a, or a whole o1), which needs a new WCS reference frame, the
+steps are as below; its images are fitted again even if already delivered,
+and images of other segments delivered before are reported:
+  tica-calibrate-tso --no_write    backgrounds for tica-darktime, no FFIs
+  tica-darktime --save_reffin      pick the reference frame
+  tica-calibrate-tso --fin         write the 16 reference CCD images
+  tica-wcs-step1-allcam-allccd     reference star lists in refout/
+  tica-calibrate-tso --hlspdir     calibrate, fit and deliver every FFI
+For later segments, tica-calibrate-tso --hlspdir runs first, then
+tica-darktime. Both finish with tica-stage-delivery --ref-stars-only and
+tica-check-delivery.
+
+Notices go by email to three audiences named in the --mail config (see
+tica.cli._notify): operators get every event, escalation also gets
+failures, and downstream gets only "delivery ready" for a segment that
+finished without errors. Without --mail they are printed.
+
+Each path and core count can also be set with the environment variable
+shown in its help. tica-wcs-step1 reads the TIC through
+the libpq service named by TICA_TIC_SERVICE (default: tic). The defaults are the MIT production
 settings.
 
-Exit codes: 0 done or nothing to do; 1 off-nominal downlink, not processed;
-2 a step reported a configuration error; 3 a step failed unexpectedly."""
+Exit codes: 0 done or nothing to do; 1 off-nominal downlink or no FFIs, not processed;
+2 a step reported a configuration error; 3 a step failed unexpectedly, or WCS
+step 1 made no star list for some CCDs (recorded as an error; nothing delivered)."""
+
+def say(message):
+    """Print a timestamped line; flushed, so it stays in order with the steps' output."""
+    print('[{}] {}'.format(time.strftime('%Y-%m-%d %H:%M:%S'), message), flush=True)
+
+
+def duration(seconds):
+    return '{:d}:{:02d}:{:02d}'.format(int(seconds) // 3600, int(seconds) % 3600 // 60, int(seconds) % 60)
+
+
+def run_step(label, module, args, cwd=None):
+    """Run a step through _common.run_command, announcing it and how it ended."""
+    say('Running {}'.format(label))
+    start = time.time()
+    rc = _common.run_command(module, args, cwd=cwd)
+    say('{} {} after {}'.format(label.split(' (')[0], 'finished' if rc == 0 else
+                                'exited with code {}'.format(rc), duration(time.time() - start)))
+    return rc
+
+
+# who hears about what
+OPERATORS = ('operators',)
+ESCALATE = ('operators', 'escalation')
+DOWNSTREAM = ('downstream',)
 
 # exit codes of the step commands
 STEP_OK, STEP_ERROR, STEP_CONFIG_ERROR = 0, 1, 2
-
-DEFAULT_MAIL_START = "mmfausnaugh@gmail.com,qlp-operators@mit.edu"
-DEFAULT_MAIL_SUCCESS = ("mmfausnaugh@gmail.com,roland@space.mit.edu,qlp-operators@mit.edu,"
-                        "fleming@stsci.edu,tberger@stsci.edu,jimig@stsci.edu,"
-                        "grr@space.mit.edu,rethiraj@ttu.edu")
-DEFAULT_MAIL_ERROR = "mmfausnaugh@gmail.com,petitpas@mit.edu"
 
 
 class Abort(Exception):
@@ -47,18 +91,34 @@ def _env(name, default):
     return os.environ.get(name, default)
 
 
+def checkout_path(*parts):
+    """A path in the TICA checkout this package runs from, or None without one."""
+    root = _common.checkout_root()
+    return os.path.join(root, *parts) if root else None
+
+
 def build_parser():
     parser = argparse.ArgumentParser(prog='tica-doall-automate', description=DESCRIPTION,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--orbit", help="process this orbit instead of the detected one "
-                        "(the segment, file counts and stem are still detected from the newest orbit)")
-    parser.add_argument("--segment", help="process this segment (e.g. o1a) instead of the detected one")
-    parser.add_argument("--caldir", default=_env("TICA_CALDIR", "/pdo/users/faus/python/tica/calibration_200sec"),
-                        help="calibration models [TICA_CALDIR] (default: %(default)s)")
+    parser.add_argument("--orbit", help="process this orbit instead of the newest one")
+    parser.add_argument("--segment", help="process only this segment of the orbit (e.g. o1a, or o1 for "
+                        "an orbit downlinked whole). Segments after the sector's first need its "
+                        "reference star lists in <workdir>/sector<S>/refout/")
+    parser.add_argument("--settle-minutes", type=float, default=float(_env("TICA_SETTLE_MINUTES", "30")),
+                        help="wait until the orbit's newest FFI is this old, so a downlink still "
+                        "being copied in is not processed [TICA_SETTLE_MINUTES] (default: %(default)s)")
+    parser.add_argument("--reffin", metavar="FIN",
+                        help="WCS reference frame (FIN, e.g. 01324500) for the sector's first segment, "
+                        "instead of the one tica-darktime picks")
+    parser.add_argument("--caldir", default=_env("TICA_CALDIR", checkout_path("calibration_200sec")),
+                        help="calibration models [TICA_CALDIR] (default: calibration_200sec in "
+                        "the TICA checkout this runs from: %(default)s)")
     parser.add_argument("--ncores", type=int, default=int(_env("TICA_NCORES", "57")),
-                        help="cores for tica-calibrate-tso [TICA_NCORES] (default: %(default)s)")
+                        help="cores for tica-calibrate-tso, which also fits the WCS "
+                        "[TICA_NCORES] (default: %(default)s)")
     parser.add_argument("--ncores-wcs", type=int, default=int(_env("TICA_NCORES_WCS", "10")),
-                        help="cores per CCD for WCS step 2 [TICA_NCORES_WCS] (default: %(default)s)")
+                        help="unused: the WCS fit now runs in the tica-calibrate-tso pool; "
+                        "kept so existing settings still parse [TICA_NCORES_WCS]")
     parser.add_argument("--dstem", default=_env("TICA_POC_ORBITS", "/pdo/poc-data/orbits/"),
                         help="POC orbit directories [TICA_POC_ORBITS] (default: %(default)s)")
     parser.add_argument("--outputdir", default=_env("TICA_DELIVERY_DIR", "/pdo/qlp-data/tica-delivery/"),
@@ -71,22 +131,29 @@ def build_parser():
                         help="processing records file [TICA_RECORDS] (default: %(default)s)")
     parser.add_argument("--ephemeris-kernel", default=_env("TICA_EPHEMERIS_KERNEL", "/pdo/poc-data/kernels/pdo_tess_setup.tm"),
                         help="SPICE kernel setup file [TICA_EPHEMERIS_KERNEL] (default: %(default)s)")
-    parser.add_argument("--ephemeris-outdir", default=_env("TICA_EPHEMERIS_OUTDIR", "/pdo/users/faus/python/tica/src/btjd/"),
-                        help="directory with tess_ephem.txt to update [TICA_EPHEMERIS_OUTDIR] "
-                        "(default: %(default)s)")
-    parser.add_argument("--records-copy", default=_env("TICA_RECORDS_COPY", "/pdo/users/faus/python/tica/"),
-                        help="directory to copy the records file to after each run, e.g. the "
-                        "production checkout; empty to skip [TICA_RECORDS_COPY] (default: %(default)s)")
-    parser.add_argument("--production-table", default=_env("TICA_PRODUCTION_TABLE", "/pdo/users/faus/python/tica/production_table.md"),
-                        help="production table to update [TICA_PRODUCTION_TABLE] (default: %(default)s)")
-    parser.add_argument("--mail-start", default=_env("TICA_MAIL_START", DEFAULT_MAIL_START),
-                        help="comma-separated recipients of the start email [TICA_MAIL_START]")
-    parser.add_argument("--mail-success", default=_env("TICA_MAIL_SUCCESS", DEFAULT_MAIL_SUCCESS),
-                        help="comma-separated recipients of the success email [TICA_MAIL_SUCCESS]")
-    parser.add_argument("--mail-error", default=_env("TICA_MAIL_ERROR", DEFAULT_MAIL_ERROR),
-                        help="comma-separated recipients of error emails [TICA_MAIL_ERROR]")
-    parser.add_argument("--no-mail", action="store_true",
-                        help="print the emails instead of sending them")
+    parser.add_argument("--ephemeris-file", default=_env(EPHEMERIS_ENV, None), metavar="FILE",
+                        help="tess_ephem.txt to update with tica-dump-ephemeris and read in the "
+                        "WCS fit [{}] (default: the copy installed with TICA, {})".format(
+                            EPHEMERIS_ENV, packaged_ephemeris()))
+    parser.add_argument("--ephemeris-outdir", default=_env("TICA_EPHEMERIS_OUTDIR", None), metavar="DIR",
+                        help="deprecated: same as --ephemeris-file DIR/tess_ephem.txt "
+                        "[TICA_EPHEMERIS_OUTDIR]")
+    parser.add_argument("--records-copy", default=_env("TICA_RECORDS_COPY", checkout_path() or ""),
+                        help="directory to copy the records file to after each run; empty to skip "
+                        "[TICA_RECORDS_COPY] (default: the TICA checkout this runs from, if any: "
+                        "%(default)s)")
+    parser.add_argument("--production-table", default=_env("TICA_PRODUCTION_TABLE",
+                                                           checkout_path("production_table.md")),
+                        help="production table to update [TICA_PRODUCTION_TABLE] (default: "
+                        "production_table.md in the TICA checkout this runs from, or else in "
+                        "--workdir: %(default)s)")
+    mail = parser.add_mutually_exclusive_group()
+    mail.add_argument("--mail", metavar="CONFIG", default=_env("TICA_MAIL_CONFIG", None),
+                      help="TOML file with the SMTP server and the operators, downstream and "
+                      "escalation recipients (see tica.cli._notify) [TICA_MAIL_CONFIG]. Without "
+                      "it, notices are printed instead of mailed")
+    mail.add_argument("--no-mail", action="store_true",
+                      help="print notices instead of mailing them, even if TICA_MAIL_CONFIG is set")
     return parser
 
 
@@ -103,18 +170,8 @@ def newest_orbit_dir(dstem):
     return min(e for e in entries if mtimes[e] == newest)
 
 
-def segment_from_orbit(orbit):
-    """o1/o2 for odd/even orbits, with the special o3/o4 orbits of sectors 97-98."""
-    orbit = int(orbit)
-    special = {203: "o3", 204: "o4", 207: "o3", 208: "o4"}
-    if orbit in special:
-        return special[orbit]
-    return "o1" if orbit % 2 == 1 else "o2"
-
-
-def file_stems(datadir):
-    """The distinct date stems (first dash field) of camera-1 files, sorted."""
-    return sorted({os.path.basename(f).split('-')[0] for f in glob.glob(os.path.join(datadir, '*-1-*'))})
+# o1/o2 (or o3/o4) for an orbit; kept here for callers of this module
+segment_from_orbit = _segments.orbit_label
 
 
 def sector_from_orbit(orbit):
@@ -128,54 +185,98 @@ def sector_from_orbit(orbit):
     return (orbit - 7) // 2
 
 
+def minutes_since_last_ffi(dstem, orbit):
+    """Minutes since an FFI last arrived in <dstem>/orbit-<orbit>/ffi_fits, or None if empty."""
+    try:
+        with os.scandir(os.path.join(dstem, 'orbit-{}'.format(orbit), 'ffi_fits')) as entries:
+            newest = max((e.stat().st_mtime for e in entries if e.name.startswith('tess')), default=None)
+    except OSError:
+        return None
+    return None if newest is None else (time.time() - newest) / 60.0
+
+
+def segment_fins(seg):
+    """The first and last cadence (FIN) of segment seg."""
+    fins = [_segments.parse_name(f)[1] for files in seg.files.values() for f in files]
+    return '{:08d}'.format(min(fins)), '{:08d}'.format(max(fins))
+
+
+def delivered_outside(delivery, seg):
+    """Delivered CCD images whose cadence is not in segment seg."""
+    fins = {_segments.parse_name(f)[1] for files in seg.files.values() for f in files}
+    names = sorted(glob.glob(os.path.join(delivery, 'cam*-ccd*', 'hlsp_*_img.fits')))
+    # hlsp_tica_tess_ffi_s<sector>-<orbit>-<fin>-cam<i>-ccd<j>_tess_<version>_img.fits
+    return [n for n in names if int(os.path.basename(n).split('-')[2]) not in fins]
+
+
+def missing_ref_stars(workdir, sector):
+    """The WCS reference star lists from o1a that are not in <workdir>/refout/."""
+    paths = [_common.ref_stars_path(os.path.join(workdir, 'refout'), sector, i, j)
+             for i in range(1, 5) for j in range(1, 5)]
+    return [p for p in paths if not os.path.isfile(p)]
+
+
 def record_line(sector, orbit, segment, counts, stem):
     return ' '.join(str(v) for v in [sector, orbit, segment] + list(counts) + [stem])
 
 
 def already_processed(records, orbit, segment, checkstr):
-    """True if a records line for this orbit and segment contains checkstr."""
+    """True if --records lists this segment with the same stem and at least these counts.
+
+    Records written before segments were worked out from the files counted
+    every FFI of the orbit directory, so a second half (o1b, o2b) was recorded
+    with both halves' counts; any line with the same orbit, segment and stem
+    whose counts cover the current ones therefore counts as processed. More
+    FFIs under the same stem than recorded means the delivery has grown, and
+    the segment is processed again.
+    """
     try:
         with open(records) as f:
             matches = [line.rstrip('\n') for line in f if '{} {}'.format(orbit, segment) in line]
     except OSError:
         return False
-    print(' '.join(' '.join(matches).split()))
-    return checkstr in '\n'.join(matches)
+    want = checkstr.split()
+    for line in matches:
+        fields = line.split()
+        if (len(fields) >= 8 and fields[1:3] == want[1:3] and fields[7] == want[7]
+                and all(int(r) >= int(c) for r, c in zip(fields[3:7], want[3:7]))):
+            return True
+    return False
 
 
 # ------------------------------------------------------------------ actions
-class Mailer:
-    def __init__(self, enabled=True):
-        self.enabled = enabled
-
-    def send(self, subject, recipients, message):
-        # the shell script sent `echo $msg`, which collapses whitespace
-        body = ' '.join(message.split()) + '\n'
-        recipients = [r for r in recipients.split(',') if r]
-        if not self.enabled:
-            print("mail to {}: {}\n{}".format(', '.join(recipients), subject, body))
-            return
-        try:
-            subprocess.run(["mail", "-s", subject] + recipients, input=body, text=True)
-        except OSError as e:
-            print("could not send mail: {}".format(e))
+def make_notifier(args):
+    """The Notifier for --mail/--no-mail; raises NotifyConfigError for a bad config."""
+    for old in ('TICA_MAIL_START', 'TICA_MAIL_SUCCESS', 'TICA_MAIL_ERROR'):
+        if os.environ.get(old):
+            say("{} is no longer used; recipients come from the --mail config.".format(old))
+    if args.no_mail:
+        return _notify.Notifier.printing()
+    if not args.mail:
+        say("No --mail config (or TICA_MAIL_CONFIG): notices are printed, not mailed.")
+        return _notify.Notifier.printing()
+    return _notify.Notifier.from_config(args.mail)
 
 
-def check_step(rc, step, args, mailer, where):
+def check_step(rc, step, args, notifier, where):
     """Apply the step exit-code contract; return 1 to flag an error, 0 if fine."""
     if rc == STEP_OK:
         return 0
     if rc == STEP_CONFIG_ERROR:
-        print("Configuration error running {}, exiting.".format(step))
-        mailer.send("tica proceessing error", args.mail_error,
-                    "Configuration error running {}, {}, exting....".format(step, where))
+        say("Configuration error in {}; stopping.".format(step))
+        notifier.send(ESCALATE, "{}: FAILED, configuration error in {}".format(where, step),
+                    "{} reported a configuration error while processing {} on {}; processing "
+                    "stopped and nothing was recorded. See the output of tica-doall-automate.\n".format(
+                        step, where, platform.node()))
         raise Abort(2)
     if rc == STEP_ERROR:
-        print("Error in {}, continuing forward".format(step))
+        say("Error in {}; continuing, and the segment will be recorded as an error.".format(step))
         return 1
-    print("Unknown error (exit code {}), abort!".format(rc))
-    mailer.send("tica proceessing error", args.mail_error,
-                "Unknown error (exit code {}), {}, aborting....".format(rc, where))
+    say("{} failed unexpectedly (exit code {}); stopping.".format(step, rc))
+    notifier.send(ESCALATE, "{}: FAILED, {} exited with code {}".format(where, step, rc),
+                "{} failed unexpectedly (exit code {}) while processing {} on {}; processing "
+                "stopped and nothing was recorded. See the output of tica-doall-automate.\n".format(
+                    step, rc, where, platform.node()))
     raise Abort(3)
 
 
@@ -192,6 +293,15 @@ def move_into(names, destdir):
             print("mv: cannot move {} to {}: {}".format(name, dest, e.strerror))
 
 
+def remove_reference_frames(workdir):
+    """Delete the calibrated reference frames written for tica-wcs-step1.
+
+    They have no WCS, so they must not reach the delivery directory.
+    """
+    for name in glob.glob(os.path.join(workdir, 'cam*_ccd*', 'tess*fits')):
+        os.remove(name)
+
+
 def tidy_segment(workdir, segment):
     """Move this segment's products into cam<i>_ccd<j>/<segment>/."""
     for i in range(1, 5):
@@ -199,13 +309,10 @@ def tidy_segment(workdir, segment):
             ccddir = os.path.join(workdir, 'cam{}_ccd{}'.format(i, j))
             if not os.path.isdir(ccddir):
                 continue
-            print(ccddir)
             segdir = os.path.join(ccddir, segment)
             os.makedirs(segdir, exist_ok=True)
-            names = sorted(glob.glob(os.path.join(ccddir, 'tess*fits')))
-            if not names:
-                print("mv: cannot stat '{}': No such file or directory".format(os.path.join(ccddir, 'tess*fits')))
-            move_into(names, segdir)
+            # FFIs, if any were written here by hand-run steps
+            move_into(sorted(glob.glob(os.path.join(ccddir, 'tess*fits'))), segdir)
             products = ['wcs_diags2', 'rms_list']
             # tica-darktime writes bad_calibration.txt only for CCDs that have bad cadences
             if os.path.exists(os.path.join(ccddir, 'bad_calibration.txt')):
@@ -227,125 +334,253 @@ def read_reffin(workdir):
 
 
 # ------------------------------------------------------------------ main
-def run(args, mailer):
+def run(args, notifier):
     dstem = args.dstem
-    lastdir = newest_orbit_dir(dstem)
-    if lastdir is None:
-        print("No orbit directories found in {}.".format(dstem))
-        return 1
-    datadir = os.path.join(dstem, lastdir, 'ffi_fits')
-    counts = [len(glob.glob(os.path.join(datadir, '*-{}-*fits*'.format(cam)))) for cam in range(1, 5)]
-
-    #logic for orbit o1a, o1b, o2a, o2b
-    orbit = lastdir.split('-')[1]
-    segment1 = segment_from_orbit(orbit)
-    stems = file_stems(datadir)
-    stem = stems[-1] if stems else ''
-    if len(stems) == 1:
-        segment2 = "a"
-    elif len(stems) == 2:
-        segment2 = "b"
-    else:
-        print("found {} processing stems in {}.  Appears to be an off nominal downlink.  "
-              "In this case, do not run data automatically.".format(len(stems), datadir))
-        return 1
-    segment = segment1 + segment2
-
-    #or, can set orbit and segment by hand
     if args.orbit is not None:
-        orbit = args.orbit
-    if args.segment is not None:
-        segment = args.segment
+        orbit = str(int(args.orbit))
+    else:
+        lastdir = newest_orbit_dir(dstem)
+        if lastdir is None:
+            say("No orbit directories found in {}.".format(dstem))
+            return 1
+        orbit = lastdir.split('-')[1]
 
-    mod = int(orbit) % 2
-    SECTOR = sector_from_orbit(orbit)
-    outputSECTOR = '{:04d}'.format(SECTOR)
-    delivery = '{}/s{}'.format(args.outputdir, outputSECTOR)
-    where = '{} {} {}'.format(SECTOR, orbit, segment)
-
-    #setup control for cron
-    checkstr = record_line(SECTOR, orbit, segment, counts, stem)
-    processed = already_processed(args.records, orbit, segment, checkstr)
-    print(checkstr)
-    if processed:
+    # a downlink still being copied in would be split into segments wrongly
+    age = minutes_since_last_ffi(dstem, orbit)
+    if age is not None and age < args.settle_minutes:
+        say("FFIs are still arriving in orbit {} (the newest is {:.0f} minutes old, less than "
+            "--settle-minutes {}); not processing yet.".format(orbit, age, args.settle_minutes))
         return 0
 
-    mailer.send("tica s{} {} proceessing started".format(SECTOR, segment), args.mail_start,
-                "Automated tica processing as a cron job has started. "
-                "An update will be sent when the processing finishes.")
+    try:
+        segments = _segments.find_segments(dstem, orbit)
+    except _segments.OffNominal as e:
+        say("{} Appears to be an off nominal downlink.  In this case, do not run data "
+              "automatically.".format(e))
+        return 1
+    if not segments:
+        say("No FFIs found in {}.".format(os.path.join(dstem, 'orbit-{}'.format(orbit), 'ffi_fits')))
+        return 1
+    if args.reffin is not None:
+        if not args.reffin.isdigit():
+            say("Configuration Error. --reffin {} is not a FIN.".format(args.reffin))
+            return 2
+        args.reffin = '{:08d}'.format(int(args.reffin))
+    if args.segment is not None:
+        names = [seg.name for seg in segments]
+        segments = [seg for seg in segments if seg.name == args.segment]
+        if not segments:
+            say("Configuration Error. Orbit {} has no segment {}; its FFIs make {}.".format(
+                orbit, args.segment, ', '.join(names)))
+            return 2
 
-    print("Running tica-dump-ephemeris")
-    _common.run_command('dump_ephemeris', ['--ephemeris', args.ephemeris_kernel,
-                                           '--outdir', args.ephemeris_outdir])
+    SECTOR = sector_from_orbit(orbit)
+    say("Orbit {} (sector {}): {}".format(orbit, SECTOR, '; '.join(
+        '{} with {} FFIs (cameras 1-4) from downlink {}'.format(
+            seg.name, '/'.join(str(n) for n in seg.counts()), ', '.join(seg.stamps))
+        for seg in segments)))
+    ephemeris_updated = False
+    for segment in segments:
+        #setup control for cron
+        # the stem is the latest delivery's tess<stamp>, as in the records from before
+        checkstr = record_line(SECTOR, orbit, segment.name, segment.counts(),
+                               'tess' + segment.stamps[-1])
+        if already_processed(args.records, orbit, segment.name, checkstr):
+            say("Segment {} is already in {}; skipping it.".format(segment.name, args.records))
+            continue
+        if not ephemeris_updated:
+            update_ephemeris(args)
+            ephemeris_updated = True
+        rc = process_segment(args, notifier, orbit, SECTOR, segment, checkstr)
+        if rc:
+            return rc
+    return 0
+
+
+def update_ephemeris(args):
+    dump_args = ['--ephemeris', args.ephemeris_kernel]
+    if args.ephemeris_file:
+        # the WCS fit in the later steps reads the same file
+        os.environ[EPHEMERIS_ENV] = args.ephemeris_file
+        dump_args += ['--output', args.ephemeris_file]
+    run_step('tica-dump-ephemeris', 'dump_ephemeris', dump_args)
+
+
+def process_segment(args, notifier, orbit, SECTOR, seg, checkstr):
+    """Calibrate, fit and deliver one segment; return a nonzero exit code to stop."""
+    dstem = args.dstem
+    segment = seg.name
+    mod = int(orbit) % 2
+    outputSECTOR = '{:04d}'.format(SECTOR)
+    delivery = '{}/s{}'.format(args.outputdir, outputSECTOR)
+    where = 'Sector {} {} (orbit {})'.format(SECTOR, segment, orbit)
 
     workdir = os.path.join(args.workdir, 'sector{}'.format(SECTOR))
+    if not seg.first_of_sector:
+        missing = missing_ref_stars(workdir, SECTOR)
+        if missing:
+            say("Configuration Error. Segment {} uses the WCS reference star lists made for the "
+                  "sector's first segment (o1a, or o1 for a whole orbit), but {} of the 16 are "
+                  "missing, e.g. {}. Process that segment first with this --workdir, or copy "
+                  "refout/ from the work directory that did.".format(segment, len(missing), missing[0]))
+            return 2
+
+    notifier.send(OPERATORS, "{}: started".format(where),
+                "Processing of {} started on {}.\n\nFFIs (cameras 1-4): {}, from downlink {}\n"
+                "Work directory: {}\nDelivery directory: {}\n\nAnother notice follows when it "
+                "finishes.\n".format(where, platform.node(), '/'.join(str(n) for n in seg.counts()),
+                                     ', '.join(seg.stamps), workdir, delivery))
+
     os.makedirs(workdir, exist_ok=True)
-    print(workdir)
+    start = time.time()
+    say("Sector {} segment {}: working in {}, delivering to {}".format(SECTOR, segment, workdir, delivery))
 
     errorflag = 0
-    print("Running tica-calibrate-tso...")
     o1, o2 = (orbit, "None") if mod == 1 else ("None", orbit)
-    rc = _common.run_command('calibrate_tso', ['--o1', o1, '--o2', o2, '--orbseg', segment,
-                                               '--dstem', dstem, '--caldir', args.caldir,
-                                               '--ncores', args.ncores], cwd=workdir)
-    errorflag |= check_step(rc, 'tica-calibrate-tso', args, mailer, where)
+    calibrate = ['--o1', o1, '--o2', o2, '--orbseg', segment,
+                 '--dstem', dstem, '--caldir', args.caldir, '--ncores', args.ncores]
+    deliver = ['--hlspdir', delivery, '--sector', SECTOR]
 
-    print("Running tica-darktime...")
-    if 'o1a' in segment:
-        _common.run_command('darktime', ['--save_reflist', '--save_reffin', '--use_first_ccd',
-                                         '--orbit', segment], cwd=workdir)
-        reffin = read_reffin(workdir)
-        print("Running tica-wcs-step1-allcam-allccd...")
-        rc = _common.run_command('wcs_step1_allccd', ['--sector', SECTOR, '--dstem', './',
-                                                      '--reffin', reffin], cwd=workdir)
-        errorflag |= check_step(rc, 'tica-wcs-step1-allcam-allccd', args, mailer, where)
+    if seg.first_of_sector:
+        #the WCS reference frame is picked from the whole segment's backgrounds,
+        #so record those first without writing any FFIs
+        rc = run_step('tica-calibrate-tso --no_write (backgrounds for choosing the reference frame)',
+                      'calibrate_tso', calibrate + ['--no_write'], cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, notifier, where)
+
+        run_step('tica-darktime --save_reffin (choose the reference frame)',
+                 'darktime', ['--save_reflist', '--save_reffin', '--use_first_ccd', '--orbit', segment],
+                 cwd=workdir)
+        reffin = args.reffin or read_reffin(workdir)
+        if not reffin:
+            message = ("TICA s{} {}: tica-darktime found no WCS reference frame that is well "
+                       "calibrated on all 16 CCDs; see {}/cam<i>_ccd1/cal_timeseries_{}.png. Pick "
+                       "one by hand with --reffin. Nothing was delivered.").format(
+                           SECTOR, segment, workdir, segment)
+            say(message)
+            notifier.send(ESCALATE, "{}: FAILED, no WCS reference frame".format(where), message + '\n')
+            write_record(args, checkstr, 'error')
+            return 3
+        if args.reffin:
+            say("Using --reffin {} instead of tica-darktime's choice.".format(args.reffin))
+        else:
+            say("Reference frame: FIN {}".format(reffin))
+
+        rc = run_step('tica-calibrate-tso --fin {} (the 16 reference CCD images)'.format(reffin),
+                      'calibrate_tso', calibrate + ['--fin', reffin], cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, notifier, where)
+
+        # remake every star list, so all come from this reference frame
+        rc = run_step('tica-wcs-step1-allcam-allccd (reference star lists from the TIC)',
+                      'wcs_step1_allccd', ['--sector', SECTOR, '--dstem', './', '--reffin', reffin,
+                                           '--overwrite'], cwd=workdir)
+        errorflag |= check_step(rc, 'tica-wcs-step1-allcam-allccd', args, notifier, where)
+        missing = missing_ref_stars(workdir, SECTOR)
+        if missing:
+            # no FFI of these CCDs can be fitted, and later segments need them too;
+            # keep the reference frames to look at
+            ccds = [os.path.basename(m)[len('reftica_s{}_'.format(SECTOR)):-len('.h5')] for m in missing]
+            message = ("TICA s{} {}: WCS step 1 made no reference star list for {} CCDs ({}), with "
+                       "reference FIN {}. See {}/tica_logs/tica_wcs_step1_cam<i>_ccd<j>.log; the "
+                       "reference frames are kept in {}/cam<i>_ccd<j>/. Nothing was delivered.").format(
+                           SECTOR, segment, len(missing), ', '.join(ccds), reffin, workdir, workdir)
+            say(message)
+            notifier.send(ESCALATE, "{}: FAILED, WCS step 1 made no star lists for {} CCDs".format(
+                where, len(missing)), message + '\n')
+            write_record(args, checkstr, 'error')
+            return 3
+        remove_reference_frames(workdir)
+
+        # the star lists were just remade, so images delivered before are fitted again
+        rc = run_step('tica-calibrate-tso --hlspdir --refit (calibrate, fit and deliver every FFI)',
+                      'calibrate_tso', calibrate + deliver + ['--no_diagnostics', '--refit'], cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, notifier, where)
+        stale = delivered_outside(delivery, seg)
+        if stale:
+            message = ("TICA s{} {}: the WCS reference star lists were remade, but {} CCD images "
+                       "already delivered in {} from other segments (e.g. {}) were fitted against "
+                       "the previous ones. Reprocess those segments (remove their --records lines).").format(
+                           SECTOR, segment, len(stale), delivery, stale[0])
+            say(message)
+            notifier.send(OPERATORS, "{}: warning, images of other segments need reprocessing".format(
+                where), message + '\n')
     else:
-        _common.run_command('darktime', ['--orbit', segment], cwd=workdir)
+        rc = run_step('tica-calibrate-tso --hlspdir (calibrate, fit and deliver every FFI)',
+                      'calibrate_tso', calibrate + deliver, cwd=workdir)
+        errorflag |= check_step(rc, 'tica-calibrate-tso', args, notifier, where)
 
-    print("Running tica-wcs-step2-allcam-allccd...")
-    rc = _common.run_command('wcs_step2_allccd', ['--sector', SECTOR, '--dstem', './',
-                                                  '--ncores', args.ncores_wcs], cwd=workdir)
-    errorflag |= check_step(rc, 'tica-wcs-step2-allcam-allccd', args, mailer, where)
+        run_step('tica-darktime (dark-time and bad-calibration lists)', 'darktime',
+                 ['--orbit', segment], cwd=workdir)
 
     tidy_segment(workdir, segment)
 
-    print("Running tica-stage-delivery...")
-    _common.run_command('stage_delivery', ['v01', delivery, segment, SECTOR], cwd=workdir)
+    run_step('tica-stage-delivery --ref-stars-only (copy the star lists to the delivery)',
+             'stage_delivery', ['v01', delivery, segment, SECTOR, '--ref-stars-only'], cwd=workdir)
 
-    print("Running tica-check-delivery...")
-    if _common.run_command('check_delivery', [delivery], cwd=workdir) != 0:
-        print("Error running tica-check-delivery.")
+    if run_step('tica-check-delivery', 'check_delivery', [delivery], cwd=workdir) != 0:
         errorflag = 1
 
-    print("my error flag", errorflag)
+    say("Sector {} segment {} {} after {}; recording it as {} in {}".format(
+        SECTOR, segment, 'finished' if errorflag == 0 else 'finished WITH ERRORS (see above)',
+        duration(time.time() - start), 'finished' if errorflag == 0 else 'an error', args.records))
     if errorflag == 0:
-        mailer.send("tica s{} {} proceessing".format(SECTOR, segment), args.mail_success,
-                    "TICA s{} {} processing complete with no errors. Data can be retrieved at {}".format(
-                        SECTOR, segment, delivery))
-        with open(args.records, 'a') as f:
-            f.write(checkstr + ' finished\n')
-        table_args = ['--segments', segment] + (['--wcs1'] if 'o1a' in segment else [])
-        _common.run_command('production_table', table_args + ['--output', args.production_table],
-                            cwd=workdir)
+        took = duration(time.time() - start)
+        notifier.send(OPERATORS, "{}: finished".format(where),
+                    "{} finished without errors on {} after {}.\n\nDelivered to: {}\n"
+                    "Recorded in: {}\n".format(where, platform.node(), took, delivery, args.records))
+        notifier.send(DOWNSTREAM, "Sector {} {} delivery ready".format(SECTOR, segment),
+                    "TICA calibrated FFIs for sector {}, orbit segment {} ({} CCD images, cadences "
+                    "{} to {}) are ready at:\n\n    {}\n".format(
+                        SECTOR, segment, 4 * sum(seg.counts()), *segment_fins(seg), delivery))
+        write_record(args, checkstr, 'finished')
+        table_args = ['--segments', segment] + (['--wcs1'] if seg.first_of_sector else [])
+        table = args.production_table or os.path.join(args.workdir, 'production_table.md')
+        run_step('tica-production-table', 'production_table', table_args + ['--output', table],
+                 cwd=workdir)
     else:
-        mailer.send("tica s{} {} proceessing".format(SECTOR, segment), args.mail_error,
-                    "TICA s{} {} processing complete, but there were errors. Look in {} "
-                    "(This is a first test of automated tica scripts. )".format(SECTOR, segment, delivery))
-        with open(args.records, 'a') as f:
-            f.write(checkstr + ' error\n')
+        notifier.send(ESCALATE, "{}: finished with errors".format(where),
+                    "{} finished on {}, but a step reported errors; see the output of "
+                    "tica-doall-automate and the logs in {}/tica_logs. The delivery in {} may be "
+                    "incomplete and was not announced downstream.\n\nIt was recorded as an error in "
+                    "{}; remove that line to process the segment again.\n".format(
+                        where, platform.node(), workdir, delivery, args.records))
+        write_record(args, checkstr, 'error')
+    return 0
 
+
+def write_record(args, checkstr, status):
+    """Append a records line, and copy the records to --records-copy."""
+    with open(args.records, 'a') as f:
+        f.write('{} {}\n'.format(checkstr, status))
     if args.records_copy:
         try:
             shutil.copy(args.records, args.records_copy)
         except OSError as e:
-            print("could not copy {} to {}: {}".format(args.records, args.records_copy, e))
-    return 0
+            say("could not copy {} to {}: {}".format(args.records, args.records_copy, e))
+
 
 
 def main(argv=None):
     args = build_parser().parse_args(argv)
+    if args.ephemeris_outdir and not args.ephemeris_file:
+        say("--ephemeris-outdir/TICA_EPHEMERIS_OUTDIR is deprecated; use --ephemeris-file/"
+              "TICA_EPHEMERIS.")
+        args.ephemeris_file = os.path.join(args.ephemeris_outdir, 'tess_ephem.txt')
+    if os.path.isdir(args.records):
+        say("Configuration Error. --records {} is a directory; give the records file, e.g. "
+              "{}".format(args.records, os.path.join(args.records, 'tica-processing-records.txt')))
+        return 2
+    if not args.caldir:
+        say("Configuration Error. No calibration directory: TICA is not running from a "
+              "checkout, so set --caldir or TICA_CALDIR.")
+        return 2
     try:
-        return run(args, Mailer(enabled=not args.no_mail))
+        notifier = make_notifier(args)
+    except _notify.NotifyConfigError as e:
+        say("Configuration Error. {}".format(e))
+        return 2
+    try:
+        return run(args, notifier)
     except Abort as e:
         return e.code
 

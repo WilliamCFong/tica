@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tica.cli import (_common, calibrate_spoc, calibrate_tso, stage_delivery, wcs_spoc,
+from tica.cli import (_common, _segments, calibrate_spoc, calibrate_tso, stage_delivery, wcs_spoc,
                       wcs_step1_allccd, wcs_step2_allccd)
 
 
@@ -81,6 +81,130 @@ def test_calibrate_tso_segment(tmp_path, monkeypatch, recorder, orbseg, stamp):
     assert len(list((out / "cam3_ccd4").glob("*_ccd4.cal.fits"))) == 2
     assert not list((out / "cam3_ccd1").glob("*_ccd4.cal.fits"))
     assert (out / "tica_logs").is_dir()
+
+
+def run_tso(tmp_path, monkeypatch, *extra):
+    make_poc(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    return calibrate_tso.main(["--o1", "205", "--o2", "None", "--orbseg", "o1a", "--dstem", "poc",
+                               "--caldir", "cal_200sec", "--ncores", "8", "--outdir", "s98"] + list(extra))
+
+
+def test_calibrate_tso_no_write(tmp_path, monkeypatch, recorder):
+    assert run_tso(tmp_path, monkeypatch, "--no_write") == 0
+    assert all(args[-2:] == ["--no_gzip", "--no_write"] for _, args, _ in recorder.calls)
+
+
+def test_calibrate_tso_fin_writes_reference_frame_only(tmp_path, monkeypatch, recorder):
+    assert run_tso(tmp_path, monkeypatch, "--fin", "00205001") == 0
+    module, args, cwd = recorder.calls[0]
+    assert module == "cal_ffi2ccds"
+    assert args[args.index("--log") + 1] == "../tica_logs/o1a_tica_reference.log"
+    assert args[-2:] == ["--no_gzip", "--no_diagnostics"]
+    inlist = (tmp_path / "s98" / "cam1_ccd1" / "inlist").read_text().split()
+    assert [os.path.basename(f) for f in inlist] == ["tess2025001000000-00205001-1-crm-ffi.fits"]
+
+
+def test_calibrate_tso_fin_not_found_exits_2(tmp_path, monkeypatch, recorder):
+    assert run_tso(tmp_path, monkeypatch, "--fin", "00999999") == 2
+    assert recorder.calls == []
+
+
+def test_calibrate_tso_hlspdir_runs_cal_ffi2hlsp(tmp_path, monkeypatch, recorder):
+    assert run_tso(tmp_path, monkeypatch, "--hlspdir", "delivery/s0098", "--sector", "98") == 0
+    out = tmp_path / "s98"
+    assert len(recorder.calls) == 4
+    module, args, cwd = recorder.calls[2]
+    assert module == "cal_ffi2hlsp" and cwd == str(out / "cam3_ccd1")
+    assert args[args.index("--orb_seg") + 1:] == [
+        "o1a", "--hlspdir", str(tmp_path / "delivery" / "s0098"), "--sector", "98",
+        "--refdir", str(out / "refout"), "--workdir", str(out), "--hlsp_version", "v01"]
+
+
+@pytest.mark.parametrize("extra", [
+    ["--hlspdir", "d"],                                    # no sector
+    ["--no_write", "--fin", "00205001"],                   # two modes
+    ["--no_write", "--hlspdir", "d", "--sector", "98"],
+])
+def test_calibrate_tso_mode_errors_exit_2(tmp_path, monkeypatch, recorder, extra):
+    assert run_tso(tmp_path, monkeypatch, *extra) == 2
+    assert recorder.calls == []
+
+
+def test_calibrate_tso_passes_on_camera_configuration_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(_common, "run_command",
+                        lambda module, args, cwd=None: 2 if cwd.endswith("cam2_ccd1") else 0)
+    assert run_tso(tmp_path, monkeypatch, "--hlspdir", "d", "--sector", "98") == 2
+
+
+def make_orbit(root, stamps_fins, orbit=205):
+    """POC FFIs for camera 1-4 with the given {stamp: fins}."""
+    d = Path(root) / "poc" / "orbit-{}".format(orbit) / "ffi_fits"
+    d.mkdir(parents=True)
+    for stamp, fins in stamps_fins.items():
+        for fin in fins:
+            for cam in range(1, 5):
+                (d / "tess{}-{:08d}-{}-crm-ffi.fits".format(stamp, fin, cam)).touch()
+    make_caldir(Path(root) / "cal_200sec")
+
+
+def run_tso_segment(tmp_path, monkeypatch, orbseg, *extra):
+    monkeypatch.chdir(tmp_path)
+    return calibrate_tso.main(["--o1", "205", "--o2", "None", "--orbseg", orbseg, "--dstem", "poc",
+                               "--caldir", "cal_200sec", "--outdir", "s98"] + list(extra))
+
+
+def inlist_names(tmp_path, cam=1):
+    return [os.path.basename(f) for f in
+            (tmp_path / "s98" / "cam{}_ccd1".format(cam) / "inlist").read_text().split()]
+
+
+@pytest.mark.parametrize("orbseg, names", [
+    ("o1a", ["tess2025001500000-00205000-1-crm-ffi.fits", "tess2025001500000-00205001-1-crm-ffi.fits"]),
+    ("o1b", ["tess2025002000000-00205010-1-crm-ffi.fits"]),
+])
+def test_calibrate_tso_redelivered_half(tmp_path, monkeypatch, recorder, orbseg, names):
+    # the first half came twice (as in orbit 227); the later copy is used
+    make_orbit(tmp_path, {"2025001000000": (205000, 205001), "2025001500000": (205000, 205001),
+                          "2025002000000": (205010,)})
+    assert run_tso_segment(tmp_path, monkeypatch, orbseg) == 0
+    assert inlist_names(tmp_path) == names
+    assert recorder.calls[0][1][recorder.calls[0][1].index("--orb_seg") + 1] == orbseg
+
+
+def test_calibrate_tso_whole_orbit(tmp_path, monkeypatch, recorder):
+    # ~13.9 days of 600 s cadences in one downlink
+    monkeypatch.setattr(_segments, "cadence_seconds", lambda path: 600.0)
+    make_orbit(tmp_path, {"2022005113210": (205000, 207000)})
+
+    assert run_tso_segment(tmp_path, monkeypatch, "o1") == 0
+    assert len(inlist_names(tmp_path)) == 2
+    args = recorder.calls[0][1]
+    # an empty ORB_SEG, as before, but the segment's own log
+    assert args[args.index("--orb_seg") + 1] == ""
+    assert args[args.index("--log") + 1] == "../tica_logs/o1_tica.log"
+
+    recorder.calls.clear()
+    assert run_tso_segment(tmp_path, monkeypatch, "o1", "--hlspdir", "d", "--sector", "98") == 0
+    args = recorder.calls[0][1]
+    assert recorder.calls[0][0] == "cal_ffi2hlsp" and args[args.index("--orb_seg") + 1] == "o1"
+
+    recorder.calls.clear()
+    assert run_tso_segment(tmp_path, monkeypatch, "o1", "--hlspdir", "d", "--sector", "98", "--refit") == 0
+    assert recorder.calls[0][1][-1] == "--refit"
+
+
+def test_calibrate_tso_segment_errors(tmp_path, monkeypatch, recorder, capsys):
+    monkeypatch.setattr(_segments, "cadence_seconds", lambda path: 200.0)
+    make_orbit(tmp_path, {"2025001000000": (205000,)})
+    assert run_tso_segment(tmp_path, monkeypatch, "o1b") == 2
+    assert "it has o1a" in capsys.readouterr().out
+
+    (tmp_path / "poc" / "orbit-205" / "ffi_fits" / "tess2025002000000-00206000-1-crm-ffi.fits").touch()
+    (tmp_path / "poc" / "orbit-205" / "ffi_fits" / "tess2025003000000-00207000-1-crm-ffi.fits").touch()
+    assert run_tso_segment(tmp_path, monkeypatch, "o1a") == 2
+    assert "3 separate downlinks" in capsys.readouterr().out
+    assert recorder.calls == []
 
 
 def test_calibrate_tso_reports_failed_camera(tmp_path, monkeypatch):
@@ -171,7 +295,44 @@ def test_wcs_step1_allccd_skips_existing_and_reports_failures(tmp_path, monkeypa
     assert rec.calls[0][1] == ["-s", "98", "-ca", "2", "-cd", "2",
                                "-ri", "./cam2_ccd2/tess2025001000000-00100724-2-crm-ffi_ccd2.cal.fits",
                                "-o", "./refout/reftica_s98_2-2.h5", "-dbg", "2",
-                               "-l", "tica_logs/tica_wcs_step1_cam2_ccd2.log"]
+                               "-l", "tica_logs/tica_wcs_step1_cam2_ccd2.log",
+                               "--catalog", "postgres", "--tic-service", "tic"]
+
+
+def test_wcs_step1_allccd_overwrite_remakes_existing(tmp_path, monkeypatch):
+    s = make_sector(tmp_path)
+    rec = Recorder()
+    monkeypatch.setattr(_common, "run_parallel", rec.run_parallel)
+    monkeypatch.chdir(s)
+
+    assert wcs_step1_allccd.main(["--sector", "98", "--dstem", "./", "--reffin", "00100724"]) == 0
+    assert rec.calls == []                       # all 16 exist
+    assert wcs_step1_allccd.main(["--sector", "98", "--dstem", "./", "--reffin", "00100724",
+                                  "--overwrite"]) == 0
+    assert len(rec.calls) == 16
+    assert list((s / "refout").glob("*.h5")) == []    # removed, for step 1 to remake
+
+
+def test_wcs_step1_allccd_passes_catalog_options(tmp_path, monkeypatch):
+    s = make_sector(tmp_path)
+    os.remove(s / "refout" / "reftica_s98_1-1.h5")
+    rec = Recorder()
+    monkeypatch.setattr(_common, "run_parallel", rec.run_parallel)
+    monkeypatch.setenv("TICA_TIC_SERVICE", "tic-test")
+    monkeypatch.chdir(s)
+
+    assert wcs_step1_allccd.main(["--sector", "98", "--dstem", "./", "--reffin", "00100724",
+                                  "--catalog", "mast"]) == 0
+    assert rec.calls[0][1][-4:] == ["--catalog", "mast", "--tic-service", "tic-test"]
+
+
+def test_wcs_step1_allccd_exit_2_when_a_ccd_cannot_reach_the_tic(tmp_path, monkeypatch):
+    s = make_sector(tmp_path)
+    os.remove(s / "refout" / "reftica_s98_1-1.h5")
+    os.remove(s / "refout" / "reftica_s98_1-2.h5")
+    monkeypatch.setattr(_common, "run_parallel", lambda jobs, cwd=None: [2, 1])
+    monkeypatch.chdir(s)
+    assert wcs_step1_allccd.main(["--sector", "98", "--dstem", "./", "--reffin", "00100724"]) == 2
 
 
 def test_wcs_step2_allccd_runs_all_ccds(tmp_path, monkeypatch, recorder):
@@ -251,6 +412,21 @@ def test_stage_delivery_names(tmp_path, monkeypatch):
     ref = out / "ref-stars" / "hlsp_tica_tess_ffi_s0098-cam4-ccd1_tess_v02_cat.h5"
     assert ref.read_text() == "ref41"
     assert len(list((out / "ref-stars").iterdir())) == 16
+
+
+def test_stage_delivery_ref_stars_only(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "refout").mkdir()
+    for i in range(1, 5):
+        for j in range(1, 5):
+            (tmp_path / "refout" / "reftica_s98_{}-{}.h5".format(i, j)).write_text("ref")
+    (tmp_path / "cam1_ccd1" / "o1a").mkdir(parents=True)
+    (tmp_path / "cam1_ccd1" / "o1a" / "tess2025001000000-00100724-1-crm-ffi_ccd1.cal.fits").touch()
+
+    assert stage_delivery.main(["v01", "out", "o1a", "98", "--ref-stars-only"]) == 0
+
+    assert len(list((tmp_path / "out" / "ref-stars").glob("hlsp_tica_tess_ffi_s0098-cam*-ccd*_tess_v01_cat.h5"))) == 16
+    assert list((tmp_path / "out").rglob("*.fits")) == []
 
 
 @pytest.mark.parametrize("segment, orbit", [("o1a", "o1"), ("o2b", "o2"), ("o3", "o3"), ("x", "")])

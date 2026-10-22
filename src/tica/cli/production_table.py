@@ -7,6 +7,8 @@ from datetime import datetime
 import h5py
 import numpy as np
 
+from tica.cli._common import ref_stars_path
+
 def calculate_step2_metrics(infile):
     d = h5py.File(infile,'r')
 
@@ -122,12 +124,12 @@ def get_from_logs(infile):
                 py_env_working =  py_env_reg.group(1)
 
             if 'sector = ' in fline:
-                wcs_sector_reg = re.search(r'sector = (\d\d)',fline)
+                wcs_sector_reg = re.search(r'sector = (\d+)',fline)
                 wcs_sector_working =  wcs_sector_reg.group(1)
 
 
             if 'working directory' in fline:
-                sector_reg = re.search(r'/sector(\d\d)/',fline)
+                sector_reg = re.search(r'/sector(\d+)/',fline)
 
                 cam_reg = re.search(r'/cam(\d)_ccd(\d)',fline)
                 cam = cam_reg.group(1)
@@ -373,7 +375,7 @@ def main(argv=None):
     for ii in [1,2,3,4]:
         for jj in [1,2,3,4]:
 
-            ref_star_file = 'refout/reftica_s{:02d}_{}-{}.h5'.format(int(sector),ii,jj)
+            ref_star_file = ref_stars_path('refout', sector, ii, jj)
             ref_star_data.append(calculate_step1_metrics(ref_star_file) )
 
             wcs_file = 'cam{}_ccd{}/{}/wcs_diags2/wcs_diag_S{:02d}_{}{}_data.h5'.format(ii,jj,

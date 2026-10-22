@@ -1,0 +1,33 @@
+# Email notifications for tica-doall-automate:
+#
+#     tica-doall-automate --mail /path/to/notify.toml ...     (or TICA_MAIL_CONFIG)
+#     tica-doall-automate --no-mail ...                       (print notices instead)
+#
+# Copy this file somewhere outside the repository and fill in real values.
+# Without --mail, notices are printed and nothing is mailed.
+
+# Optional; put in front of every subject. This is the default.
+subject_prefix = "[TICA]"
+
+[smtp]
+host = "outgoing.example.edu"
+# Defaults: 25, or 465 when security = "ssl".
+port = 587
+# "none" (default), "starttls" or "ssl".
+security = "starttls"
+# Optional. With a username, the password is read from password_file or from
+# $TICA_SMTP_PASSWORD; never write it in this file.
+username = "tica"
+password_file = "~/.tica-smtp-password"
+sender = "TICA pipeline <tica@example.edu>"
+# Optional; where replies go.
+reply_to = "operators@example.edu"
+
+[recipients]
+# Every event for every segment: started, finished, warnings, failures.
+operators = ["operators@example.edu"]
+# Only "delivery ready", for a segment that finished without errors and
+# passed tica-check-delivery, e.g. the archive and science users.
+downstream = ["archive@example.org", "science-team@example.edu"]
+# Failures only, in addition to operators, e.g. the maintainer.
+escalation = ["maintainer@example.edu"]

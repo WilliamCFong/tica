@@ -83,8 +83,9 @@ def make_sector(root, segment="o1a", sector=98):
     return sdir
 
 
-def test_production_table_appends_one_row_per_ccd(tmp_path, monkeypatch):
-    sdir = make_sector(tmp_path)
+@pytest.mark.parametrize("sector", [98, 108])      # 108: the first 3-digit sector
+def test_production_table_appends_one_row_per_ccd(tmp_path, monkeypatch, sector):
+    sdir = make_sector(tmp_path, sector=sector)
     table = tmp_path / "production_table.md"
     monkeypatch.chdir(sdir)
 
@@ -94,7 +95,7 @@ def test_production_table_appends_one_row_per_ccd(tmp_path, monkeypatch):
     lines = table.read_text().splitlines()
     assert len(lines) == 2 + 16 + 16          # header, alignment, two runs of 16 CCDs
     first = [c.strip() for c in lines[2].split("|")]
-    assert first[1:4] == ["0098", "o1a", "2026.10.20-01:00:00"]
+    assert first[1:4] == ["{:04d}".format(sector), "o1a", "2026.10.20-01:00:00"]
     assert first[4] == "2026.10.20-06:16:00"     # latest end time over all logs
     assert "00100724" in lines[2]                 # reference FFI from step 1
 
@@ -123,10 +124,85 @@ def test_darktime_writes_lists_and_reffin(tmp_path, monkeypatch):
 
     reffin = (sdir / "reffin.txt").read_text().split()
     assert reffin[0] == "cam1_ccd1" and len(reffin) == 32
+    assert len(set(reffin[1::2])) == 1                  # one frame for every CCD
     assert len((sdir / "cam1_ccd1" / "ref_list").read_text().splitlines()) == 20
     assert not (sdir / "cam2_ccd1" / "ref_list").exists()       # --use_first_ccd
     assert (sdir / "cam3_ccd4" / "rms_list").stat().st_size > 0
     assert (sdir / "cam1_ccd1" / "cal_timeseries_o1a.png").exists()
+
+
+def _series(n=200, seed=3):
+    """cal_timeseries data for 4 cameras: backgrounds ~20000-30000, steady overclocks."""
+    rng = np.random.default_rng(seed)
+    fins = np.arange(1324000, 1324000 + n)
+    names = (["mode_ccd%d" % j for j in range(1, 5)]
+             + ["output%s_ccd%d" % (c, j) for j in range(1, 5) for c in "ABCD"])
+    out = []
+    for cam in range(4):
+        data = np.zeros(n, dtype=[(name, float) for name in names])
+        for j in range(1, 5):
+            data["mode_ccd%d" % j] = 20000 + 10000 * np.linspace(0, 1, n) ** 2 + rng.normal(0, 100, n)
+            for c in "ABCD":
+                data["output%s_ccd%d" % (c, j)] = rng.normal(5000, 2, n)
+        out.append([fins, data, np.zeros(n, dtype=int)])
+    return out
+
+
+def test_choose_reffin_skips_stray_light_and_miscalibrated_frames():
+    series = _series()
+    # like orbit 227 FIN 01324272: camera 1 reads far too low, camera 2 is flooded
+    bad = 10
+    for j in range(1, 5):
+        series[0][1]["mode_ccd%d" % j][bad] = [4165, 4225, 1469, 0][j - 1]
+        series[1][1]["mode_ccd%d" % j][bad] = 340866
+    fin, why = darktime.choose_reffin(series)
+    assert fin != 1324000 + bad
+    assert 1324000 <= fin < 1324050                      # early, where every CCD is dark
+    assert "worst CCD" in why
+
+    # the darkest clean frame, unless it has a stray-light flag
+    best = fin
+    for cam in range(4):
+        series[cam][2][best - 1324000] = 0b0011
+    fin2, _ = darktime.choose_reffin(series)
+    assert fin2 != best
+
+    # every frame flagged: the flags are ignored, with a note
+    for cam in range(4):
+        series[cam][2][:] = 1
+    fin3, why3 = darktime.choose_reffin(series)
+    assert fin3 == best and "flags were ignored" in why3
+
+
+def test_choose_reffin_without_a_clean_frame():
+    series = _series(n=20)
+    for cam in range(4):
+        series[cam][1]["mode_ccd2"][:] = 0
+    fin, why = darktime.choose_reffin(series)
+    assert fin is None and "16 CCDs" in why
+
+
+def test_darktime_reads_straylight_column(tmp_path, monkeypatch):
+    sdir = tmp_path / "sector98"
+    series = _series(n=150)
+    cols = (["name"] + list(series[0][1].dtype.names) + ["straylight"])
+    for cam in range(1, 5):
+        for ccd in range(1, 5):
+            (sdir / "cam{}_ccd{}".format(cam, ccd)).mkdir(parents=True)
+        fins, data, _ = series[cam - 1]
+        with open(sdir / "cam{}_ccd1".format(cam) / "cal_timeseries.txt", "w") as f:
+            f.write("{:>45s} ".format(cols[0]) + "".join("{:>15s}".format(c) for c in cols[1:]) + "\n")
+            for k, fin in enumerate(fins):
+                f.write("{:>45s} ".format("tess2025001000000-%08d-%d-crm-ffi.fits" % (fin, cam))
+                        + "".join("{:>15.2f}".format(v) for v in data[k])
+                        + "{:>15d}".format(3 if k < 60 else 0) + "\n")   # early frames flagged
+    monkeypatch.chdir(sdir)
+    monkeypatch.setenv("MPLBACKEND", "Agg")
+
+    assert darktime.main(["--save_reffin", "--orbit", "o1a"]) == 0
+    lines = (sdir / "reffin.txt").read_text().splitlines()
+    assert len(lines) == 16 and len({line.split()[1] for line in lines}) == 1
+    assert int(lines[0].split()[1]) >= 1324000 + 60     # not a flagged frame
 
 
 def _make_delivery(root, n_ffis=2, nan_column=None):
@@ -154,7 +230,7 @@ def test_check_delivery_accepts_complete_delivery(tmp_path, capsys):
     ddir = _make_delivery(tmp_path)
     assert check_delivery.main([str(ddir), "--processes", "2"]) == 0
     out = capsys.readouterr().out
-    assert "check complete!" in out
+    assert "no problems" in out
     assert "has 1 extensions" not in out
 
 
@@ -169,7 +245,7 @@ def test_check_delivery_rejects_missing_ccd(tmp_path, capsys):
 def test_check_delivery_rejects_nan_star_list(tmp_path, capsys, bad):
     ddir = _make_delivery(tmp_path, n_ffis=0, nan_column=bad)
     assert check_delivery.main([str(ddir)]) == 1
-    assert "NaN value found in column {}".format(bad) in capsys.readouterr().out
+    assert "NaN value in column {}".format(bad) in capsys.readouterr().out
 
 
 @pytest.mark.skipif(
@@ -192,3 +268,13 @@ def test_overclock_stats_writes_16_rows_per_ffi(tmp_path, monkeypatch):
     assert list(table["sector"][:4]) == ["A", "B", "C", "D"]
     assert sorted(set(table["ccd"])) == [1, 2, 3, 4]
     np.testing.assert_allclose(table["correct"], 6000, atol=5)
+
+
+def test_check_delivery_counts_ffi_problems(tmp_path, capfd):
+    ddir = _make_delivery(tmp_path)
+    with fits.open(ddir / "cam2-ccd3" / "ffi0.fits", mode="update") as f:
+        f[0].header["A_ORDER"] = 0
+    assert check_delivery.main([str(ddir)]) == 0
+    out = capfd.readouterr().out          # the problem is printed by a pool worker
+    assert "A_ORDER is 0" in out
+    assert "Checked 32 FFIs in 16 CCD directories and 16 star lists" in out and "1 problems" in out

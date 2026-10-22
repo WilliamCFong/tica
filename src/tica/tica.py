@@ -981,13 +981,10 @@ class FFI_File(FFI):
             raise
 
 
-    def write_CCD_files(self,
-                        CCDlist, 
-                        stem, 
-                        calibrated=True,
-                        no_gzip=False):
-
-        for i,ccd in enumerate(CCDlist):      
+    def CCD_hdus(self, CCDlist, calibrated=True):
+        """One PrimaryHDU per CCD, with the headers write_CCD_files gives them."""
+        hdus = []
+        for i,ccd in enumerate(CCDlist):
             hdu_out = fits.PrimaryHDU(ccd.get_frame().astype(np.float32))
             for key in self.header.keys():                                                     
                 #censor the standard fits headers, which have to be changed.                      
@@ -1023,10 +1020,22 @@ class FFI_File(FFI):
 
             else:
                 hdu_out.header.set('UNITS',  'ADU', 'Units (ADU or electrons)')
-                
 
+            hdus.append(hdu_out)
+        return hdus
+
+    def calibrated_CCD_hdus(self):
+        return self.CCD_hdus(self.calibrated_CCDs)
+
+    def write_CCD_files(self,
+                        CCDlist,
+                        stem,
+                        calibrated=True,
+                        no_gzip=False):
+
+        for i, (ccd, hdu_out) in enumerate(zip(CCDlist, self.CCD_hdus(CCDlist, calibrated=calibrated))):
             hdulist = fits.HDUList([hdu_out])
-        
+
             inpath, infilename = os.path.split(self.fname)   # get path and original filename
             inbasename, inext = os.path.splitext(infilename)  # get basename and extension 
             if inext == '.gz' :

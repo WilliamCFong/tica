@@ -54,6 +54,88 @@ def clean_islands(FFInums, mask_keep, N_ffis_per_island):
 #mode_sigma = 5
 frac_above_min = 1.10
 
+# A CCD background at or below this fraction of the CCD's 10th percentile is a
+# calibration problem, not dark sky: e.g. a bias spoiled by a saturating
+# stray-light source, as on camera 1 at FIN 01324272 of orbit 227.
+MISCALIBRATED_FRACTION = 0.5
+
+
+def load_timeseries(infile):
+    """(FFInums, names, data, straylight) from a cal_timeseries.txt, sorted by FIN.
+
+    straylight is the STRAYLT1-4 bitmask per frame, or None for files written
+    before that column was added.
+    """
+    with open(infile) as f:
+        columns = f.readline().split()
+    fname_all = np.genfromtxt(infile,unpack=1,usecols=(0),dtype=str,skip_header=1)
+    data_all  = np.genfromtxt(infile,names=True,usecols=tuple(range(1, 21)))
+    straylight = None
+    if 'straylight' in columns:
+        straylight = np.atleast_1d(np.genfromtxt(infile, usecols=(columns.index('straylight'),),
+                                                 skip_header=1, dtype=int))
+    FFInum_all = np.array([ int(e.split('-')[1]) for e in fname_all  ])
+    idx = np.argsort(FFInum_all)
+    return (FFInum_all[idx], fname_all[idx], data_all[idx],
+            None if straylight is None else straylight[idx])
+
+
+def bad_calibration(data_all, jj):
+    """Frames with a bad calibration of CCD jj+1.
+
+    An overclock (1D bias) correction more than 20 sigma from the median on
+    any output, e.g. from saturation by the Earth or Moon, or a background mode
+    of 0, which is set if saturation is not yet spiking the overclocks but the
+    imaging array is near zero or negative.
+    """
+    bad = np.zeros(len(data_all), dtype=bool)
+    for output_channel in ['A','B','C','D']:
+        overclock_correct = data_all['output{}_ccd{}'.format(output_channel, jj+1)]
+        deviations = overclock_correct - np.median(overclock_correct)
+        scatter = np.median(abs(deviations))/0.67449
+        bad |= abs(deviations) > 20*scatter
+    return bad | (data_all['mode_ccd{}'.format(jj+1)] == 0)
+
+
+def choose_reffin(series):
+    """One WCS reference FIN for all 16 CCDs; returns (FIN or None, explanation).
+
+    series has (FFInums, data, straylight) for each camera, as from
+    load_timeseries. Candidates are the frames of all four cameras with no bad
+    calibration on any CCD (bad_calibration, or a background at most
+    MISCALIBRATED_FRACTION of that CCD's 10th percentile) and no stray-light
+    flag. The candidate whose worst CCD is least above its own 10th-percentile
+    background is chosen. If every candidate has a stray-light flag, the flags
+    are ignored.
+    """
+    fins = np.array(sorted(set.intersection(*(set(f.tolist()) for f, _, _ in series))))
+    if len(fins) == 0:
+        return None, 'the cameras have no frame in common'
+    ok = np.ones(len(fins), dtype=bool)
+    stray = np.zeros(len(fins), dtype=bool)
+    ratios = []
+    for fin_all, data, straylight in series:
+        pos = np.searchsorted(fin_all, fins)
+        if straylight is not None:
+            stray |= straylight[pos] != 0
+        for jj in range(4):
+            mode_all = data['mode_ccd{}'.format(jj+1)]
+            positive = mode_all[mode_all > 0]
+            dark = np.percentile(positive, 10) if len(positive) else np.inf
+            mode = mode_all[pos]
+            ok &= ~bad_calibration(data, jj)[pos] & (mode > MISCALIBRATED_FRACTION*dark)
+            ratios.append(mode/dark)
+    worst = np.max(ratios, axis=0)
+    for use, note in ((ok & ~stray, ''),
+                      (ok, '; every well-calibrated frame has a stray-light flag, so the flags '
+                           'were ignored')):
+        if use.any():
+            k = np.flatnonzero(use)[np.argmin(worst[use])]
+            return int(fins[k]), ('FIN {:08d}, whose worst CCD is at {:.2f}x its 10th-percentile '
+                                  'background ({} of {} frames were candidates){}'.format(
+                                      fins[k], worst[k], int(use.sum()), len(fins), note))
+    return None, 'no frame is well calibrated on all 16 CCDs'
+
 
 def build_parser():
     description_string = """
@@ -67,6 +149,12 @@ def build_parser():
     frames needed to make the difference imaging reference, and a long
     list for rms images after the difference imaging (for a transient
     search).
+
+    The REFFIN is one frame for all 16 CCDs: the frame whose worst CCD is
+    closest to its own dark background, among frames with no bad
+    calibration on any CCD and, when cal_timeseries.txt records them, no
+    stray-light flag (STRAYLT1-4). reffin.txt lists it for every CCD. With
+    --save_reffin, exits 1 if there is no such frame.
 
     """
 
@@ -94,8 +182,8 @@ def build_parser():
                         help="If set, copy cam1_ccd1/ref_list to other CCDs.")
 
     parser.add_argument("--save_reffin",action='store_true',
-                        help="If set, save lowest background REFFIN in reffin.txt, "
-                        "to use with wcs_step1.py.")
+                        help="If set, save the WCS reference REFFIN (see above) in reffin.txt, "
+                        "to use with tica-wcs-step1.")
 
     parser.add_argument("--save_reflist",action='store_true',
                         help="If set, save 20 good REFFINs in cam?_ccd?/ref_list, "
@@ -118,24 +206,23 @@ def main(argv=None):
         if os.path.isfile('reffin.txt'):
             os.remove('reffin.txt')
 
+    series = [load_timeseries('cam{}_ccd1/cal_timeseries.txt'.format(ii + 1)) for ii in range(4)]
+    global_reffin, why = choose_reffin([(f, d, st) for f, _, d, st in series])
+    print('Read {} frames per camera; WCS reference frame: {}'.format(
+        '/'.join(str(len(f)) for f, _, _, _ in series), why))
+    if args.save_reffin:
+        if global_reffin is None:
+            print('Error: no WCS reference frame; reffin.txt not written.')
+        else:
+            #the same frame for every CCD
+            with open('reffin.txt','w') as fout:
+                for ii in range(4):
+                    for jj in range(4):
+                        fout.write('cam{}_ccd{} {:08d}\n'.format(ii + 1, jj + 1, global_reffin))
+
     for ii in range(4):
         infile = 'cam{}_ccd1/cal_timeseries.txt'.format(ii + 1)
-
-        fname_all = np.genfromtxt(infile,unpack=1,usecols=(0),dtype=str,skip_header=1)
-        data_all  = np.genfromtxt(infile,names=True,usecols=(1,2,3,4,
-                                                         5,6,7,8,
-                                                         9,10,11,12,
-                                                         13,14,15,16,
-                                                         17,18,19,20))
-
-        #data =np.array(data).T
-        #unique_modes = np.sort(np.unique(mode))
-        FFInum_all = np.array([ int(e.split('-')[1]) for e in fname_all  ])
-        print(len(FFInum_all))
-        idx = np.argsort(FFInum_all)
-        FFInum_all = FFInum_all[idx]
-        fname_all=fname_all[idx]
-        data_all = data_all[idx]
+        FFInum_all, fname_all, data_all, _ = series[ii]
 
 
 
@@ -158,7 +245,7 @@ def main(argv=None):
             ########################################################
             #bad_calibration
             ########################################################
-            bad_cal_trim = np.zeros(len(FFInum_all),dtype=bool)
+            bad_cal_trim = bad_calibration(data_all, jj)
 
             for output_channel in ['A','B','C','D']:
                 overclock_correct = data_all['output{}_ccd{}'.format(output_channel,
@@ -167,8 +254,6 @@ def main(argv=None):
                 deviations = overclock_correct   - np.median(overclock_correct)
                 scatter = np.median(  abs( deviations) )/0.67449
 
-                bad_cal_trim += abs(deviations) > 20*scatter
-
                 low = np.ones(len(FFInum_all))*(np.median(overclock_correct)  - 18*scatter)
                 high = np.ones(len(FFInum_all))*(np.median(overclock_correct) + 18*scatter)
                 axes[jj][1].fill_between(FFInum_all, high, low, facecolor='k',alpha=0.2)
@@ -176,11 +261,6 @@ def main(argv=None):
                 axes[jj][1].plot(FFInum_all[bad_cal_trim],
                                  data_all['output{}_ccd{}'.format(output_channel,
                                                                   jj+1)][bad_cal_trim], 'r.')
-
-
-                #mode = 0 is set if saturation is not yet spiking the overclocks,
-                #but imaging array is near zero or negative
-                bad_cal_trim += data_all[ccduse] == 0
 
             if len(np.where(bad_cal_trim)[0]) > 0:
                 np.savetxt('cam{}_ccd{}/bad_calibration.txt'.format(ii + 1, jj+1),
@@ -217,7 +297,6 @@ def main(argv=None):
 
             #m = data['mode_ccd{}'.format(jj+1)] < unique_modes[low_modes_num]
             m = data[ccduse] < thresh
-            print(thresh, unique_modes[0])
             m = clean_islands(FFInum, m, args.N_ffis_per_island)
 
             axes[jj][0].plot(FFInum[m], data[ccduse][m],'b.',
@@ -247,16 +326,14 @@ def main(argv=None):
             ########################################################
             #REFFIN
             ########################################################
-            #find the lowest bins, get something near the middle
-            m = data[ccduse] == unique_modes.min()
-            idxs = np.where(m)[0]
-            idx = idxs[ len(idxs)//2 ]
-            reffin = FFInum[idx]
-
-            if args.save_reffin:
-                with open('reffin.txt','a') as fout:
-                    fout.write('cam{}_ccd{} {:08d}\n'.format( ii + 1, jj + 1,
-                                                              int(FFInum[idx]))  )
+            #one frame for all CCDs (choose_reffin); without one, mark this
+            #CCD's darkest frame, near the middle of the lowest bin
+            if global_reffin is not None:
+                reffin = global_reffin
+            else:
+                m = data[ccduse] == unique_modes.min()
+                idxs = np.where(m)[0]
+                reffin = FFInum[idxs[ len(idxs)//2 ]]
 
             lo,hi = axes[jj][0].get_ylim()
             axes[jj][0].plot([reffin,reffin],
@@ -330,8 +407,7 @@ def main(argv=None):
                                 fout.write('{}-{:08d}-{}-crm-ffi_ccd{}.cal.fits\n'.format(
                                     fstem,FFInum[idx_r], ii+1, jj + 1))
             except Exception as e:
-                print(e)
-                pass
+                print('cam{} ccd{}: could not make ref_list: {}'.format(ii + 1, jj + 1, e))
 
 
         wrkdir = os.getcwd()
@@ -360,7 +436,7 @@ def main(argv=None):
 
     if args.show:
         plt.show()
-    return 0
+    return 1 if args.save_reffin and global_reffin is None else 0
 
 
 if __name__ == "__main__":

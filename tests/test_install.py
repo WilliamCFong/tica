@@ -116,3 +116,81 @@ def test_fit_wcs_recovers_tess_point_model():
     fit_ras, fit_decs = w.all_pix2world(cols, rows, 1)
     sep = np.hypot((fit_ras - ras) * np.cos(np.radians(decs)), fit_decs - decs) * 3600.0
     assert np.max(sep) < 1.0  # arcsec
+
+
+def test_ephemeris_path_follows_environment(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    import sys
+
+    import btjd
+
+    monkeypatch.delenv("TICA_EPHEMERIS", raising=False)
+    assert btjd.ephemeris_path() == btjd.packaged_ephemeris()
+    ephem = tmp_path / "tess_ephem.txt"
+    shutil.copy(btjd.packaged_ephemeris(), ephem)
+    monkeypatch.setenv("TICA_EPHEMERIS", str(ephem))
+    assert btjd.ephemeris_path() == str(ephem)
+
+    # the WCS fit reads it when the module is imported, as in each step's process
+    out = subprocess.run([sys.executable, "-c",
+                          "import wcs_build.step2_mkwcs as m; print(m.ephemeris_file)"],
+                         capture_output=True, text=True, check=True)
+    assert out.stdout.strip().splitlines()[-1] == str(ephem)
+
+
+def test_dump_ephemeris_output_path(monkeypatch):
+    from tica.cli import dump_ephemeris
+
+    monkeypatch.setenv("TICA_EPHEMERIS", "/ephem/tess_ephem.txt")
+    parse = dump_ephemeris.build_parser().parse_args
+    assert dump_ephemeris.output_path(parse(["--ephemeris", "k.tm"])) == "/ephem/tess_ephem.txt"
+    assert dump_ephemeris.output_path(parse(["--ephemeris", "k.tm", "--output", "e.txt"])) == "e.txt"
+    assert dump_ephemeris.output_path(parse(["--ephemeris", "k.tm", "--outdir", "d"])) == "d/tess_ephem.txt"
+
+
+class FakeSpice:
+    """Stands in for spiceypy: 'now' is the TJD set in .now, positions are the time."""
+
+    def __init__(self, dump_ephemeris):
+        self.now = 0.0
+        self.dump = dump_ephemeris
+
+    def kclear(self):
+        pass
+
+    def boddef(self, name, code):
+        pass
+
+    def furnsh(self, path):
+        pass
+
+    def str2et(self, utc):
+        return self.dump.tjd2et(self.now)
+
+    def spkezr(self, target, et, frame, abcorr, observer):
+        return [et, 0.0, 0.0, 0.0, 0.0, 0.0], 0.0
+
+
+def test_dump_ephemeris_appends_without_repeating_rows(tmp_path, monkeypatch, capsys):
+    import numpy as np
+
+    from tica.cli import dump_ephemeris
+
+    spice = FakeSpice(dump_ephemeris)
+    monkeypatch.setattr(dump_ephemeris, "s", spice)
+    out = tmp_path / "eph" / "tess_ephem.txt"
+    argv = ["--ephemeris", "k.tm", "--output", str(out)]
+
+    spice.now = 1250.1
+    assert dump_ephemeris.main(argv) == 0
+    n_first = len(out.read_text().splitlines())
+    spice.now = 1250.25
+    assert dump_ephemeris.main(argv) == 0
+    assert dump_ephemeris.main(argv) == 0            # nothing new to add
+    assert "is up to date" in capsys.readouterr().out
+
+    t = np.genfromtxt(out, usecols=0)
+    assert n_first > 1 and len(t) > n_first
+    assert np.all(np.diff(t) > 0)                     # no repeated rows
+    assert np.allclose(np.diff(t), dump_ephemeris.STEP, atol=2e-6)

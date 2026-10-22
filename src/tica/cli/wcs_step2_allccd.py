@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 from tica.cli import _common
@@ -44,7 +45,7 @@ def main(argv=None):
             imgfiles = _common.sorted_glob('{}/cam{}_ccd{}/tess*-{}-crm-ffi_ccd{}.cal.fits'.format(dstem, i, j, i, j))
             jobs.append(('wcs_step2',
                          ['-s', SECTOR, '-ca', i, '-cd', j,
-                          '-rd', '{}/refout/reftica_s{}_{}-{}.h5'.format(dstem, SECTOR, i, j),
+                          '-rd', _common.ref_stars_path(os.path.join(dstem, 'refout'), SECTOR, i, j),
                           '-if'] + imgfiles
                          + ['-fd', 6, '-dbg', args.debug,
                             '--log', 'tica_logs/tica_wcs_step2_cam{}_ccd{}.log'.format(i, j),

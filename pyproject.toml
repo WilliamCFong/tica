@@ -31,7 +31,7 @@ dependencies = [
     "h5py>=3.6",
     "tess-point>=0.8.0",
     "gwcs>=1.0",
-    "psycopg2-binary>=2.9",
+    "psycopg[binary]>=3.1",
     "spiceypy>=6.0",
 ]
 
@@ -43,6 +43,7 @@ data = ["dvc>=3.0"]
 [project.scripts]
 tica-cal-ccd2ccd = "tica.cli.cal_ccd2ccd:main"
 tica-cal-ffi2ccds = "tica.cli.cal_ffi2ccds:main"
+tica-cal-ffi2hlsp = "tica.cli.cal_ffi2hlsp:main"
 tica-cal-ffi2ffi = "tica.cli.cal_ffi2ffi:main"
 tica-ccd-report = "tica.cli.ccd_report:main"
 tica-ffi2ccds = "tica.cli.ffi2ccds:main"
