@@ -44,18 +44,15 @@ def copy_ref_stars(camnum, ccdnum, version, outdir, sector):
     try:
         shutil.copyfile(ref, '{}/ref-stars/hlsp_tica_tess_ffi_s{:04d}-cam{}-ccd{}_tess_{}_cat.h5'.format(
             outdir, int(sector), camnum, ccdnum, version))
-    except FileNotFoundError as e:
-        print(e)
+    except FileNotFoundError:
+        print("No reference star list for cam{} ccd{}: {} is missing".format(camnum, ccdnum, ref))
 
 
 def do_move(camnum, ccdnum, version, outdir, subdir, sector):
     indir = os.path.abspath('cam{}_ccd{}/{}'.format(camnum, ccdnum, subdir))
 
     outdir_use = '{}/cam{}-ccd{}'.format(outdir, camnum, ccdnum)
-    if os.path.isdir(outdir_use):
-        print(outdir_use + " exists")
-    else:
-        os.makedirs(outdir_use, exist_ok=True)
+    os.makedirs(outdir_use, exist_ok=True)
 
     for path in _common.sorted_glob(os.path.join(indir, 'tess*fits')):
         ii = os.path.basename(path)

@@ -215,7 +215,10 @@ def main(argv=None):
                        'Delivered {} images, {} failed'.format(len(fits_ok), failed),
                        'Runtime: {0:.2f}sec'.format(runtime)])
 
-    print("Runtime: {0:.2f}sec".format(runtime), "N Pools = {}".format(args.parallel))
+    delivered = sum(1 for _, _, _, wcs in results for w in wcs if w is not None)
+    print("Camera {}: delivered {} CCD images to {}, {} failed, in {:.0f} s with {} processes".format(
+        ', '.join(str(c) for c in cameras), delivered, args.hlspdir, nfailed, runtime, args.parallel),
+        flush=True)
     logger.info("N Pools = {}".format(args.parallel))
     logger.info("Runtime: {0:.2f}sec".format(runtime))
     if nfailed:

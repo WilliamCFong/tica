@@ -230,7 +230,7 @@ def test_check_delivery_accepts_complete_delivery(tmp_path, capsys):
     ddir = _make_delivery(tmp_path)
     assert check_delivery.main([str(ddir), "--processes", "2"]) == 0
     out = capsys.readouterr().out
-    assert "check complete!" in out
+    assert "no problems" in out
     assert "has 1 extensions" not in out
 
 
@@ -245,7 +245,7 @@ def test_check_delivery_rejects_missing_ccd(tmp_path, capsys):
 def test_check_delivery_rejects_nan_star_list(tmp_path, capsys, bad):
     ddir = _make_delivery(tmp_path, n_ffis=0, nan_column=bad)
     assert check_delivery.main([str(ddir)]) == 1
-    assert "NaN value found in column {}".format(bad) in capsys.readouterr().out
+    assert "NaN value in column {}".format(bad) in capsys.readouterr().out
 
 
 @pytest.mark.skipif(
@@ -268,3 +268,13 @@ def test_overclock_stats_writes_16_rows_per_ffi(tmp_path, monkeypatch):
     assert list(table["sector"][:4]) == ["A", "B", "C", "D"]
     assert sorted(set(table["ccd"])) == [1, 2, 3, 4]
     np.testing.assert_allclose(table["correct"], 6000, atol=5)
+
+
+def test_check_delivery_counts_ffi_problems(tmp_path, capfd):
+    ddir = _make_delivery(tmp_path)
+    with fits.open(ddir / "cam2-ccd3" / "ffi0.fits", mode="update") as f:
+        f[0].header["A_ORDER"] = 0
+    assert check_delivery.main([str(ddir)]) == 0
+    out = capfd.readouterr().out          # the problem is printed by a pool worker
+    assert "A_ORDER is 0" in out
+    assert "Checked 32 FFIs in 16 CCD directories and 16 star lists" in out and "1 problems" in out

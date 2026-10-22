@@ -12,7 +12,8 @@ from tess_stars2px import tess_stars2px_function_entry
 try:
     import pyds9 as pd
 except ImportError:
-    print('Warning: No pyds9 installed.  No debugging with image display available')
+    # only used to show images at high debug levels
+    pd = None
 from astropy.io import fits
 #import photutils.centroids as cent
 import matplotlib.pyplot as plt
@@ -390,10 +391,12 @@ def _get_refimg_ctrlpts(SECTOR_WANT, CAMERA_WANT, CCD_WANT, REF_IMAGE, outputFil
                         gotN = gotN + 1
             j = j+1
         if (gotN < nTry):
-            print('Something went wrong determining initial pixel position correction on reference image!')
-            print('Could not find nTry: {} targets passing gdPRF (gotN: {})'.format(nTry,gotN))
-            logging.error('Something went wrong determining initial pixel position correction on reference image!')
-            logging.error('Could not find nTry: {0:d} targets passing gdPRF'.format(nTry))
+            message = ('Sector {} cam{} ccd{}: block {} of the reference image has only {} of the {} '
+                       'isolated stars (passing gdPRF) needed for the initial position correction; '
+                       'is the reference frame affected by stray light?').format(
+                           SECTOR_WANT, CAMERA_WANT, CCD_WANT, i, gotN, nTry)
+            print(message)
+            logging.error(message)
             raise SystemExit(1)
         # From these nTry targets calculate the col and row translation from prediction
         corCol = np.median(delCols)

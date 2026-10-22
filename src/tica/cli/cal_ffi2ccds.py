@@ -155,7 +155,9 @@ def main(argv=None):
 
     runtime = time() - starttime
 
-    print("Runtime: {0:.2f}sec".format(runtime), "N Pools = {}".format(args.parallel))
+    print("Calibrated {} FFIs{} in {:.0f} s with {} processes".format(
+        len(inlist), ' (no FFIs written)' if args.no_write else ' into ' + os.path.abspath(args.outdir),
+        runtime, args.parallel), flush=True)
     logger.info("N Pools = {}".format(args.parallel))
     logger.info("Runtime: {0:.2f}sec".format(runtime))
     return 0

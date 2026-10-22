@@ -49,6 +49,9 @@ def output_path(args):
     return args.output or ephemeris_path()
 
 
+#spacing of the rows, about 15 minutes (TJD days)
+STEP = 0.010412
+
 tofffin = 577364091.1874759      # Calculated using s.str2et("2018-04-18 22:53:42.001873 UTC"), which is in turn from poctime -t  0 -i SPM3 -o UTC
 tofftjd = 1227.45475911# Calculated using poctime -i SPM3 -o TJD -t 0
 
@@ -79,43 +82,36 @@ def main(argv=None):
 
     outfile = output_path(args)
     os.makedirs(os.path.dirname(os.path.abspath(outfile)), exist_ok=True)
-    print('updating', outfile)
 
     if not os.path.isfile(outfile):
         t0 = 1250.00080076  #TJD of launch + 23 days, to make spice happy
     else:
-        t = np.genfromtxt(outfile,usecols=(0))
-        t0 = t[-1]
+        #continue from the step after the file's last row, which is already there
+        t = np.atleast_1d(np.genfromtxt(outfile,usecols=(0)))
+        t0 = t[-1] + STEP
 
 
     d = datetime.utcnow()
     utc_t1 = d.strftime('%Y-%m-%d-%H:%M:%S')
-    print('in UTC',utc_t1)
     t1 = utc2tjd(utc_t1)
-    print('convert tjd',t1)
 
-    #spacing is about 15 minutes
-    time_in = np.r_[t0:t1:0.010412]
-    if len(time_in) < 2:
+    time_in = np.r_[t0:t1:STEP]
+    if len(time_in) == 0:
+        print('{} is up to date (to TJD {:.3f})'.format(outfile, t0 - STEP))
         return 0
     t_spiceypy = tjd2et(time_in)
     #t_spiceypy = s.str2et(utc)
 
     #s.spkezr returns 6-element array of position and velocity
     #and a scalar light travel time
-    print(t_spiceypy)
     tess_position = np.array([s.spkezr('TESS', tm, 'J2000', 'NONE', '0')[0] for tm in t_spiceypy ])
 
 
 
-    if not os.path.isfile(outfile):
-        with open(outfile,'w') as fout:
-            for ii,row in enumerate(tess_position):
-                fout.write('{:15.6f} {:15e} {:15e} {:15e} {:8.4f} {:8.4f} {:8.4f}\n'.format(time_in[ii], row[0],row[1],row[2],row[3],row[4],row[5]))
-    else:
-        with open(outfile,'a') as fout:
-            for ii,row in enumerate(tess_position):
-                fout.write('{:15.6f} {:15e} {:15e} {:15e} {:8.4f} {:8.4f} {:8.4f}\n'.format(time_in[ii], row[0],row[1],row[2],row[3],row[4],row[5]))
+    with open(outfile,'a') as fout:
+        for ii,row in enumerate(tess_position):
+            fout.write('{:15.6f} {:15e} {:15e} {:15e} {:8.4f} {:8.4f} {:8.4f}\n'.format(time_in[ii], row[0],row[1],row[2],row[3],row[4],row[5]))
+    print('{}: added {} positions, TJD {:.3f} to {:.3f}'.format(outfile, len(time_in), time_in[0], time_in[-1]))
     return 0
 
 

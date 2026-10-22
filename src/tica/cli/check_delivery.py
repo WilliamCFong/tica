@@ -80,66 +80,76 @@ def check_ref_stars(duse):
             return False
 
     for ref_file in ref_files:
-        print(ref_file)
         with h5py.File(ref_file, 'r') as f:
             for col in REF_COLUMNS:
                 if col not in f.keys():
-                    print('  Unexpected column {} found in file'.format(col))
+                    print('{}: missing column {}'.format(ref_file, col))
                     return False
                 if any(np.isnan(f[col])):
-                    print('  NaN value found in column {}'.format(col))
+                    print('{}: NaN value in column {}'.format(ref_file, col))
                     return False
     return True
 
 
 def check_with_message(condition, message):
+    """Print message if condition fails; return 1 for a problem, 0 otherwise."""
     if not condition:
-        print(message)
+        # flushed: pool workers end with os._exit, which drops buffered output
+        print(message, flush=True)
+        return 1
+    return 0
 
 
 def worker(in_tuple):
-    """Check the FFIs in one CCD directory, printing any problems."""
+    """Check the FFIs in one CCD directory, printing any problems.
+
+    Returns (number of FFIs, number of problems found).
+    """
     d, N_cad_check = in_tuple
 
-    print('checking ffis in ', d)
+    problems = 0
     ffi_files = glob.glob(d + '/*fits')
     if len(ffi_files) != N_cad_check:
-        print('Directory {} has {} files, expected {}'.format(d, len(ffi_files), N_cad_check))
+        # not counted as a problem: CCDs can miss different cadences in the raw data
+        print('Note: {} has {} FFIs, cam4-ccd4 has {}'.format(d, len(ffi_files), N_cad_check), flush=True)
     for ffi in ffi_files:
         with fits.open(ffi) as f:
             hdr = f[0].header
-            check_with_message(len(f) == 2,
+            problems += check_with_message(len(f) == 2,
                                '  File {} has {} extensions'.format(ffi, len(f)))
-            check_with_message(hdr['NAXIS1'] == 2136,
+            problems += check_with_message(hdr['NAXIS1'] == 2136,
                                '  File {} has NAXIS1 equal to {}, should be 2136'.format(ffi, hdr['NAXIS1']))
-            check_with_message(hdr['NAXIS2'] == 2078,
+            problems += check_with_message(hdr['NAXIS2'] == 2078,
                                '  File {} has NAXIS2 equal to {}, should be 2078'.format(ffi, hdr['NAXIS2']))
-            check_with_message(hdr['CTYPE1'] == 'RA---TAN-SIP',
+            problems += check_with_message(hdr['CTYPE1'] == 'RA---TAN-SIP',
                                '  File {} has CTYPE1 equal to {}, should be "RA--TAN-SIP"'.format(ffi, hdr['CTYPE1']))
-            check_with_message(hdr['CTYPE2'] == 'DEC--TAN-SIP',
+            problems += check_with_message(hdr['CTYPE2'] == 'DEC--TAN-SIP',
                                '  File {} has CTYPE2 equal to {}, should be "DEC--TAN-SIP'.format(ffi, hdr['CTYPE2']))
-            check_with_message(hdr['CRPIX1'] == 1069.0,
+            problems += check_with_message(hdr['CRPIX1'] == 1069.0,
                                '  File {} has CRPIX1 equal to {}, should be 1069.0'.format(ffi, hdr['CRPIX1']))
-            check_with_message(hdr['CRPIX2'] == 1024.0,
+            problems += check_with_message(hdr['CRPIX2'] == 1024.0,
                                '  File {} has CRPIX2 equal to {}, should be 1024.0'.format(ffi, hdr['CRPIX2']))
-            check_with_message(not np.isnan(hdr['CRVAL1']),
+            problems += check_with_message(not np.isnan(hdr['CRVAL1']),
                                '  File {} CRVAL1 is {} (should not be Nan)'.format(ffi, hdr['CRVAL1']))
-            check_with_message(not np.isnan(hdr['CRVAL2']),
+            problems += check_with_message(not np.isnan(hdr['CRVAL2']),
                                '  File {} CRVAL2 is {} (should not be Nan)'.format(ffi, hdr['CRVAL2']))
-            check_with_message(not hdr['A_ORDER'] == 0,
+            problems += check_with_message(not hdr['A_ORDER'] == 0,
                                '  File {} A_ORDER is {} (should not be 0)'.format(ffi, hdr['A_ORDER']))
-            check_with_message(not np.isnan(hdr['A_ORDER']),
+            problems += check_with_message(not np.isnan(hdr['A_ORDER']),
                                '  File {} A_ORDER is {} (should not be NaN)'.format(ffi, hdr['A_ORDER']))
-            check_with_message(not hdr['B_ORDER'] == 0,
+            problems += check_with_message(not hdr['B_ORDER'] == 0,
                                '  File {} B_ORDER is {} (should not be 0)'.format(ffi, hdr['B_ORDER']))
-            check_with_message(not np.isnan(hdr['B_ORDER']),
+            problems += check_with_message(not np.isnan(hdr['B_ORDER']),
                                '  File {} B_ORDER is {} (should not be NaN)'.format(ffi, hdr['B_ORDER']))
 
             for col in FFI_COLUMNS:
                 if col not in f[1].data.names:
-                    print('  File {} has unexpected column {} in extension 1'.format(ffi, col))
+                    print('  File {} has unexpected column {} in extension 1'.format(ffi, col), flush=True)
+                    problems += 1
                 if any(np.isnan(f[1].data[col])):
-                    print('  File {} has NaN in column {} (ext 1)'.format(ffi, col))
+                    print('  File {} has NaN in column {} (ext 1)'.format(ffi, col), flush=True)
+                    problems += 1
+    return len(ffi_files), problems
 
 
 def build_parser():
@@ -172,14 +182,18 @@ def main(argv=None):
         p.close()
         p.join()
 
-        for res in results_async:
+        nffis = problems = 0
+        for d, res in zip(CCD_DIRS, results_async):
             try:
-                res.get()
+                n, p_ = res.get()
             except Exception as e:
-                print(e)
+                print('{}: could not check: {}'.format(os.path.join(duse, d), e))
                 return 1
+            nffis += n
+            problems += p_
 
-    print('check complete! No assertion errors')
+    print('Checked {} FFIs in 16 CCD directories and 16 star lists in {}: {}'.format(
+        nffis, duse, 'no problems' if problems == 0 else '{} problems, listed above'.format(problems)))
     return 0
 
 

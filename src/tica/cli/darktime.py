@@ -208,7 +208,8 @@ def main(argv=None):
 
     series = [load_timeseries('cam{}_ccd1/cal_timeseries.txt'.format(ii + 1)) for ii in range(4)]
     global_reffin, why = choose_reffin([(f, d, st) for f, _, d, st in series])
-    print('WCS reference frame: {}'.format(why))
+    print('Read {} frames per camera; WCS reference frame: {}'.format(
+        '/'.join(str(len(f)) for f, _, _, _ in series), why))
     if args.save_reffin:
         if global_reffin is None:
             print('Error: no WCS reference frame; reffin.txt not written.')
@@ -222,7 +223,6 @@ def main(argv=None):
     for ii in range(4):
         infile = 'cam{}_ccd1/cal_timeseries.txt'.format(ii + 1)
         FFInum_all, fname_all, data_all, _ = series[ii]
-        print(len(FFInum_all))
 
 
 
@@ -297,7 +297,6 @@ def main(argv=None):
 
             #m = data['mode_ccd{}'.format(jj+1)] < unique_modes[low_modes_num]
             m = data[ccduse] < thresh
-            print(thresh, unique_modes[0])
             m = clean_islands(FFInum, m, args.N_ffis_per_island)
 
             axes[jj][0].plot(FFInum[m], data[ccduse][m],'b.',
@@ -408,8 +407,7 @@ def main(argv=None):
                                 fout.write('{}-{:08d}-{}-crm-ffi_ccd{}.cal.fits\n'.format(
                                     fstem,FFInum[idx_r], ii+1, jj + 1))
             except Exception as e:
-                print(e)
-                pass
+                print('cam{} ccd{}: could not make ref_list: {}'.format(ii + 1, jj + 1, e))
 
 
         wrkdir = os.getcwd()

@@ -52,10 +52,7 @@ def main(argv=None):
     dstem = args.dstem
 
     refout = os.path.join(dstem, 'refout')
-    if os.path.isdir(refout):
-        print("refout exists")
-    else:
-        os.mkdir(refout)
+    os.makedirs(refout, exist_ok=True)
 
     DEBUGIT = 2
 
@@ -79,7 +76,13 @@ def main(argv=None):
 
     #set a flag if there are errors.
     #this lets us processes everything, but make a note of issues
+    print("WCS step 1 for {} CCDs with reference frame FIN {}".format(len(jobs), args.reffin), flush=True)
     rcs = _common.run_parallel(jobs)
+    for (module, job_args), rc in zip(jobs, rcs):
+        if rc:
+            cam, ccd = job_args[job_args.index('-ca') + 1], job_args[job_args.index('-cd') + 1]
+            print("WCS step 1 failed for cam{} ccd{} (exit code {}); see "
+                  "tica_logs/tica_wcs_step1_cam{}_ccd{}.log".format(cam, ccd, rc, cam, ccd), flush=True)
     if 2 in rcs:
         return 2
     return 1 if any(rcs) else 0

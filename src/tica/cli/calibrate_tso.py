@@ -225,8 +225,20 @@ def main(argv=None):
     #set a flag if there are errors.
     #this lets us processes everything, but make a note of issues
     errorflag = 0
+    if args.hlspdir is not None:
+        doing = 'calibrating, fitting and delivering to {}'.format(os.path.abspath(args.hlspdir))
+    elif args.no_write:
+        doing = 'calibrating for diagnostics only, writing no FFIs'
+    elif args.fin is not None:
+        doing = 'writing the reference frame FIN {}'.format(args.fin)
+    else:
+        doing = 'calibrating into {}/cam<i>_ccd<j>'.format(outdir)
     for i in range(1, 5):
         camdir = os.path.join(outdir, 'cam{}_ccd1'.format(i))
+        with open(os.path.join(camdir, 'inlist')) as f:
+            nfiles = sum(1 for line in f if line.strip())
+        print('Camera {}: {} FFIs{}; {}'.format(
+            i, nfiles, ' of ' + orbseg if orbseg else '', doing), flush=True)
         rc = _common.run_command(module,
                                  ['inlist', '--outdir', '.', '--caldir', caldir,
                                   '--parallel', args.ncores, '--log', logfile,
